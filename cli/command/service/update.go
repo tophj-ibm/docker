@@ -42,19 +42,19 @@ func newUpdateCommand(dockerCli *command.DockerCli) *cobra.Command {
 	addServiceFlags(cmd, opts)
 
 	flags.Var(newListOptsVar(), flagEnvRemove, "Remove an environment variable")
-	flags.Var(newListOptsVar(), flagGroupRemove, "Remove previously added supplementary user groups from the container")
+	flags.Var(newListOptsVar(), flagGroupRemove, "Remove a previously added supplementary user group from the container")
 	flags.Var(newListOptsVar(), flagLabelRemove, "Remove a label by its key")
 	flags.Var(newListOptsVar(), flagContainerLabelRemove, "Remove a container label by its key")
 	flags.Var(newListOptsVar(), flagMountRemove, "Remove a mount by its target path")
 	flags.Var(newListOptsVar(), flagPublishRemove, "Remove a published port by its target port")
 	flags.Var(newListOptsVar(), flagConstraintRemove, "Remove a constraint")
-	flags.Var(&opts.labels, flagLabelAdd, "Add or update service labels")
-	flags.Var(&opts.containerLabels, flagContainerLabelAdd, "Add or update container labels")
-	flags.Var(&opts.env, flagEnvAdd, "Add or update environment variables")
+	flags.Var(&opts.labels, flagLabelAdd, "Add or update a service label")
+	flags.Var(&opts.containerLabels, flagContainerLabelAdd, "Add or update a container label")
+	flags.Var(&opts.env, flagEnvAdd, "Add or update an environment variable")
 	flags.Var(&opts.mounts, flagMountAdd, "Add or update a mount on a service")
-	flags.StringSliceVar(&opts.constraints, flagConstraintAdd, []string{}, "Add or update placement constraints")
+	flags.StringSliceVar(&opts.constraints, flagConstraintAdd, []string{}, "Add or update a placement constraint")
 	flags.Var(&opts.endpoint.ports, flagPublishAdd, "Add or update a published port")
-	flags.StringSliceVar(&opts.groups, flagGroupAdd, []string{}, "Add additional supplementary user groups to the container")
+	flags.StringSliceVar(&opts.groups, flagGroupAdd, []string{}, "Add an additional supplementary user group to the container")
 	return cmd
 }
 
@@ -181,7 +181,9 @@ func updateService(flags *pflag.FlagSet, spec *swarm.ServiceSpec) error {
 	updateEnvironment(flags, &cspec.Env)
 	updateString(flagWorkdir, &cspec.Dir)
 	updateString(flagUser, &cspec.User)
-	updateMounts(flags, &cspec.Mounts)
+	if err := updateMounts(flags, &cspec.Mounts); err != nil {
+		return err
+	}
 
 	if flags.Changed(flagLimitCPU) || flags.Changed(flagLimitMemory) {
 		taskResources().Limits = &swarm.Resources{}
@@ -270,6 +272,14 @@ func updateService(flags *pflag.FlagSet, spec *swarm.ServiceSpec) error {
 
 	if err := updateHealthcheck(flags, cspec); err != nil {
 		return err
+	}
+
+	if flags.Changed(flagTTY) {
+		tty, err := flags.GetBool(flagTTY)
+		if err != nil {
+			return err
+		}
+		cspec.TTY = tty
 	}
 
 	return nil
@@ -402,20 +412,53 @@ func removeItems(
 	return newSeq
 }
 
-func updateMounts(flags *pflag.FlagSet, mounts *[]mounttypes.Mount) {
+type byMountSource []mounttypes.Mount
+
+func (m byMountSource) Len() int      { return len(m) }
+func (m byMountSource) Swap(i, j int) { m[i], m[j] = m[j], m[i] }
+func (m byMountSource) Less(i, j int) bool {
+	a, b := m[i], m[j]
+
+	if a.Source == b.Source {
+		return a.Target < b.Target
+	}
+
+	return a.Source < b.Source
+}
+
+func updateMounts(flags *pflag.FlagSet, mounts *[]mounttypes.Mount) error {
+
+	mountsByTarget := map[string]mounttypes.Mount{}
+
 	if flags.Changed(flagMountAdd) {
 		values := flags.Lookup(flagMountAdd).Value.(*opts.MountOpt).Value()
-		*mounts = append(*mounts, values...)
+		for _, mount := range values {
+			if _, ok := mountsByTarget[mount.Target]; ok {
+				return fmt.Errorf("duplicate mount target")
+			}
+			mountsByTarget[mount.Target] = mount
+		}
 	}
-	toRemove := buildToRemoveSet(flags, flagMountRemove)
+
+	// Add old list of mount points minus updated one.
+	for _, mount := range *mounts {
+		if _, ok := mountsByTarget[mount.Target]; !ok {
+			mountsByTarget[mount.Target] = mount
+		}
+	}
 
 	newMounts := []mounttypes.Mount{}
-	for _, mount := range *mounts {
+
+	toRemove := buildToRemoveSet(flags, flagMountRemove)
+
+	for _, mount := range mountsByTarget {
 		if _, exists := toRemove[mount.Target]; !exists {
 			newMounts = append(newMounts, mount)
 		}
 	}
+	sort.Sort(byMountSource(newMounts))
 	*mounts = newMounts
+	return nil
 }
 
 func updateGroups(flags *pflag.FlagSet, groups *[]string) error {

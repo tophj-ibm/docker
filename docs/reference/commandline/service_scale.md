@@ -28,8 +28,8 @@ Options:
 
 ### Scale a service
 
-The scale command enables you to scale one or more replicated services either up 
-or down to the desired number of replicas. This command cannot be applied on 
+The scale command enables you to scale one or more replicated services either up
+or down to the desired number of replicas. This command cannot be applied on
 services which are global mode. The command will return immediately, but the
 actual scaling of the service may take some time. To stop all replicas of a
 service while keeping the service active in the swarm you can set the scale to 0.
@@ -56,8 +56,8 @@ replicas.
 ```bash
 $ docker service ls --filter name=frontend
 
-ID            NAME      REPLICAS  IMAGE         COMMAND
-3pr5mlvu3fh9  frontend  15/50     nginx:alpine
+ID            NAME      MODE        REPLICAS  IMAGE
+3pr5mlvu3fh9  frontend  replicated  15/50     nginx:alpine
 ```
 
 You can also scale a service using the [`docker service update`](service_update.md)
@@ -80,9 +80,9 @@ backend scaled to 3
 frontend scaled to 5
 
 $ docker service ls
-ID            NAME      REPLICAS  IMAGE         COMMAND
-3pr5mlvu3fh9  frontend  5/5       nginx:alpine
-74nzcxxjv6fq  backend   3/3       redis:3.0.6
+ID            NAME      MODE        REPLICAS  IMAGE
+3pr5mlvu3fh9  frontend  replicated  5/5       nginx:alpine
+74nzcxxjv6fq  backend   replicated  3/3       redis:3.0.6
 ```
 
 ## Related information

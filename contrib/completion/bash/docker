@@ -1162,9 +1162,12 @@ _docker_container_port() {
 	esac
 }
 
-# TODO new command
 _docker_container_prune() {
-	:
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--force -f --help" -- "$cur" ) )
+			;;
+	esac
 }
 
 _docker_container_ps() {
@@ -1236,6 +1239,7 @@ _docker_container_run() {
 		--cpu-rt-period
 		--cpu-rt-runtime
 		--cpuset-cpus
+		--cpus
 		--cpuset-mems
 		--cpu-shares -c
 		--device
@@ -2070,9 +2074,12 @@ _docker_image_ls() {
 	esac
 }
 
-# TODO new command
 _docker_image_prune() {
-	:
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--all -a --force -f --help" -- "$cur" ) )
+			;;
+	esac
 }
 
 _docker_image_pull() {
@@ -2184,9 +2191,11 @@ _docker_info() {
 }
 
 _docker_inspect() {
+	local preselected_type
 	local type
 
 	if [ "$1" = "--type" ] ; then
+		preselected_type=yes
 		type="$2"
 	else
 		type=$(__docker_value_of_option --type)
@@ -2197,17 +2206,17 @@ _docker_inspect() {
 			return
 			;;
 		--type)
-			if [ -z "$type" ] ; then
+			if [ -z "$preselected_type" ] ; then
 				COMPREPLY=( $( compgen -W "image container" -- "$cur" ) )
+				return
 			fi
-			return
 			;;
 	esac
 
 	case "$cur" in
 		-*)
 			local options="--format -f --help --size -s"
-			if [ -z "$type" ] ; then
+			if [ -z "$preselected_type" ] ; then
 				options+=" --type"
 			fi
 			COMPREPLY=( $( compgen -W "$options" -- "$cur" ) )
@@ -2404,6 +2413,14 @@ _docker_network_ls() {
 	esac
 }
 
+_docker_network_prune() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--force -f --help" -- "$cur" ) )
+			;;
+	esac
+}
+
 _docker_network_rm() {
 	case "$cur" in
 		-*)
@@ -2421,6 +2438,7 @@ _docker_network() {
 		disconnect
 		inspect
 		ls
+		prune
 		rm
 	"
 	__docker_subcommands "$subcommands" && return
@@ -2611,6 +2629,7 @@ _docker_service_update() {
 
 	local boolean_options="
 		--help
+		--tty -t
 		--with-registry-auth
 	"
 
@@ -3100,9 +3119,12 @@ _docker_system() {
 	esac
 }
 
-# TODO new command
 _docker_system_df() {
-	:
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help --verbose -v" -- "$cur" ) )
+			;;
+	esac
 }
 
 _docker_system_events() {
@@ -3209,9 +3231,12 @@ _docker_system_info() {
 	esac
 }
 
-# TODO new command
 _docker_system_prune() {
-	:
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--all -a --force -f --help" -- "$cur" ) )
+			;;
+	esac
 }
 
 
@@ -3309,6 +3334,14 @@ _docker_volume_ls() {
 	esac
 }
 
+_docker_volume_prune() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--force -f --help" -- "$cur" ) )
+			;;
+	esac
+}
+
 _docker_volume_rm() {
 	case "$cur" in
 		-*)
@@ -3325,6 +3358,7 @@ _docker_volume() {
 		create
 		inspect
 		ls
+		prune
 		rm
 	"
 	__docker_subcommands "$subcommands" && return

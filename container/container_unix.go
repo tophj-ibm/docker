@@ -1,4 +1,4 @@
-// +build linux freebsd
+// +build linux freebsd solaris
 
 package container
 
@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/Sirupsen/logrus"
 	containertypes "github.com/docker/docker/api/types/container"
@@ -20,6 +19,7 @@ import (
 	"github.com/docker/docker/utils"
 	"github.com/docker/docker/volume"
 	"github.com/opencontainers/runc/libcontainer/label"
+	"golang.org/x/sys/unix"
 )
 
 // DefaultSHMSize is the default size (64MB) of the SHM which will be mounted in the container
@@ -200,7 +200,7 @@ func (container *Container) CopyImagePathContent(v volume.Volume, destination st
 			logrus.Warnf("error while unmounting volume %s: %v", v.Name(), err)
 		}
 	}()
-	if err := label.Relabel(path, container.MountLabel, true); err != nil && err != syscall.ENOTSUP {
+	if err := label.Relabel(path, container.MountLabel, true); err != nil && err != unix.ENOTSUP {
 		return err
 	}
 	return copyExistingContents(rootfs, path)
@@ -320,10 +320,6 @@ func (container *Container) UpdateContainer(hostConfig *containertypes.HostConfi
 	return nil
 }
 
-func detachMounted(path string) error {
-	return syscall.Unmount(path, syscall.MNT_DETACH)
-}
-
 // UnmountVolumes unmounts all volumes
 func (container *Container) UnmountVolumes(forceSyscall bool, volumeEventLog func(name, action string, attributes map[string]string)) error {
 	var (
@@ -418,7 +414,7 @@ func (container *Container) TmpfsMounts() ([]Mount, error) {
 	}
 	for dest, mnt := range container.MountPoints {
 		if mnt.Type == mounttypes.TypeTmpfs {
-			data, err := volume.ConvertTmpfsOptions(mnt.Spec.TmpfsOptions)
+			data, err := volume.ConvertTmpfsOptions(mnt.Spec.TmpfsOptions, mnt.Spec.ReadOnly)
 			if err != nil {
 				return nil, err
 			}

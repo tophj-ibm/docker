@@ -427,7 +427,7 @@ Create a container
           You must use this with `memory` and make the swap value larger than `memory`.
     -   **MemoryReservation** - Memory soft limit in bytes.
     -   **KernelMemory** - Kernel memory limit in bytes.
-    -   **NanoCPUs** - CPU quota in units of 10<sup>-9</sup> CPUs.
+    -   **NanoCPUs** - CPU quota in units of 10<sup>-9</sup> CPUs. The default value is 0, which means there is no limit.
     -   **CpuCount** - An integer value containing the number of usable CPUs.
           Windows daemon only. On Windows Server containers,
           the processor resource controls are mutually exclusive, the order of precedence
@@ -1756,7 +1756,7 @@ Build an image from a Dockerfile
     HTTP/1.1 200 OK
     Content-Type: application/json
 
-    {"stream": "Step 1..."}
+    {"stream": "Step 1/5..."}
     {"stream": "..."}
     {"error": "Error...", "errorDetail": {"code": 123, "message": "Error..."}}
 
@@ -4290,16 +4290,26 @@ Content-Type: application/json
 -   **200** - no error
 -   **404** - plugin not installed
 
-<!-- TODO Document "docker plugin set" endpoint once implemented
 ### Configure a plugin
 
-`POST /plugins/(plugin name)/set`
+POST /plugins/(plugin name)/set`
+
+**Example request**:
+
+
+    POST /plugins/tiborvass/no-remove/set
+    Content-Type: application/json
+
+    ["DEBUG=1"]
+
+**Example response**:
+
+    HTTP/1.1 204 No Content
 
 **Status codes**:
 
--   **500** - not implemented
-
--->
+-   **204** - no error
+-   **404** - plugin not installed
 
 ### Enable a plugin
 
@@ -5102,7 +5112,8 @@ image](#create-an-image) section for more details.
               }
             }
           ],
-          "User": "33"
+          "User": "33",
+          "TTY": false
         },
         "LogDriver": {
           "Name": "json-file",
@@ -5179,6 +5190,7 @@ image](#create-an-image) section for more details.
         - **User** – A string value specifying the user inside the container.
         - **Labels** – A map of labels to associate with the service (e.g.,
           `{"key":"value", "key2":"value2"}`).
+        - **TTY** – A boolean indicating whether a pseudo-TTY should be allocated.
         - **Mounts** – Specification for mounts to be added to containers
           created as part of the service.
             - **Target** – Container path.
@@ -5380,7 +5392,8 @@ image](#create-an-image) section for more details.
           "Image": "busybox",
           "Args": [
             "top"
-          ]
+          ],
+          "TTY": true
         },
         "Resources": {
           "Limits": {},
@@ -5428,6 +5441,7 @@ image](#create-an-image) section for more details.
         - **User** – A string value specifying the user inside the container.
         - **Labels** – A map of labels to associate with the service (e.g.,
           `{"key":"value", "key2":"value2"}`).
+        - **TTY** – A boolean indicating whether a pseudo-TTY should be allocated.
         - **Mounts** – Specification for mounts to be added to containers created as part of the new
           service.
             - **Target** – Container path.

@@ -137,7 +137,8 @@ ENV DOCKER_CROSSPLATFORMS \
 	linux/386 linux/arm \
 	darwin/amd64 \
 	freebsd/amd64 freebsd/386 freebsd/arm \
-	windows/amd64 windows/386
+	windows/amd64 windows/386 \
+	solaris/amd64
 
 # Dependency for golint
 ENV GO_TOOLS_COMMIT 823804e1ae08dbb14eb807afc7db9993bc9e3cc3
@@ -193,6 +194,15 @@ RUN git clone https://github.com/docker/docker-py.git /docker-py \
 	&& cd /docker-py \
 	&& git checkout -q $DOCKER_PY_COMMIT \
 	&& pip install -r test-requirements.txt
+
+# Install yamllint for validating swagger.yaml
+RUN pip install yamllint==1.5.0
+
+# Install go-swagger for validating swagger.yaml
+ENV GO_SWAGGER_COMMIT c28258affb0b6251755d92489ef685af8d4ff3eb
+RUN git clone https://github.com/go-swagger/go-swagger.git /go/src/github.com/go-swagger/go-swagger \
+	&& (cd /go/src/github.com/go-swagger/go-swagger && git checkout -q $GO_SWAGGER_COMMIT) \
+	&& go install -v github.com/go-swagger/go-swagger/cmd/swagger
 
 # Set user.email so crosbymichael's in-container merge commits go smoothly
 RUN git config --global user.email 'docker-dummy@example.com'
