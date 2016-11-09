@@ -3,7 +3,7 @@
 # Usage:
 #
 # # Assemble the full dev environment. This is slow the first time.
-# docker build -t docker-go2 .
+# docker build -t docker-upstream-go .
 #
 # # Mount your source in an interactive container for quick testing:
 # docker run -v `pwd`:/go/src/github.com/docker/docker --privileged -i -t docker bash
