@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/docker/libnetwork/ns"
 	"github.com/docker/libnetwork/types"
@@ -211,6 +211,11 @@ func NewSandbox(key string, osCreate, isRestore bool) (Sandbox, error) {
 		return nil, fmt.Errorf("failed to create a netlink handle: %v", err)
 	}
 
+	err = n.nlHandle.SetSocketTimeout(ns.NetlinkSocketsTimeout)
+	if err != nil {
+		logrus.Warnf("Failed to set the timeout on the sandbox netlink handle sockets: %v", err)
+	}
+
 	if err = n.loopbackUp(); err != nil {
 		n.nlHandle.Delete()
 		return nil, err
@@ -253,6 +258,11 @@ func GetSandboxForExternalKey(basePath string, key string) (Sandbox, error) {
 		return nil, fmt.Errorf("failed to create a netlink handle: %v", err)
 	}
 
+	err = n.nlHandle.SetSocketTimeout(ns.NetlinkSocketsTimeout)
+	if err != nil {
+		logrus.Warnf("Failed to set the timeout on the sandbox netlink handle sockets: %v", err)
+	}
+
 	if err = n.loopbackUp(); err != nil {
 		n.nlHandle.Delete()
 		return nil, err
@@ -263,10 +273,10 @@ func GetSandboxForExternalKey(basePath string, key string) (Sandbox, error) {
 
 func reexecCreateNamespace() {
 	if len(os.Args) < 2 {
-		log.Fatal("no namespace path provided")
+		logrus.Fatal("no namespace path provided")
 	}
 	if err := mountNetworkNamespace("/proc/self/ns/net", os.Args[1]); err != nil {
-		log.Fatal(err)
+		logrus.Fatal(err)
 	}
 }
 
@@ -338,7 +348,7 @@ func (n *networkNamespace) InvokeFunc(f func()) error {
 func InitOSContext() func() {
 	runtime.LockOSThread()
 	if err := ns.SetNamespace(); err != nil {
-		log.Error(err)
+		logrus.Error(err)
 	}
 	return runtime.UnlockOSThread
 }

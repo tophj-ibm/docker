@@ -59,6 +59,8 @@ type IssueNodeCertificateRequest struct {
 	// Token represents a user-provided string that is necessary for new
 	// nodes to join the cluster
 	Token string `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	// Availability allows a user to control the current scheduling status of a node
+	Availability NodeSpec_Availability `protobuf:"varint,4,opt,name=availability,proto3,enum=docker.swarmkit.v1.NodeSpec_Availability" json:"availability,omitempty"`
 }
 
 func (m *IssueNodeCertificateRequest) Reset()                    { *m = IssueNodeCertificateRequest{} }
@@ -89,6 +91,22 @@ func (m *GetRootCACertificateResponse) Reset()                    { *m = GetRoot
 func (*GetRootCACertificateResponse) ProtoMessage()               {}
 func (*GetRootCACertificateResponse) Descriptor() ([]byte, []int) { return fileDescriptorCa, []int{5} }
 
+type GetUnlockKeyRequest struct {
+}
+
+func (m *GetUnlockKeyRequest) Reset()                    { *m = GetUnlockKeyRequest{} }
+func (*GetUnlockKeyRequest) ProtoMessage()               {}
+func (*GetUnlockKeyRequest) Descriptor() ([]byte, []int) { return fileDescriptorCa, []int{6} }
+
+type GetUnlockKeyResponse struct {
+	UnlockKey []byte  `protobuf:"bytes,1,opt,name=unlock_key,json=unlockKey,proto3" json:"unlock_key,omitempty"`
+	Version   Version `protobuf:"bytes,2,opt,name=version" json:"version"`
+}
+
+func (m *GetUnlockKeyResponse) Reset()                    { *m = GetUnlockKeyResponse{} }
+func (*GetUnlockKeyResponse) ProtoMessage()               {}
+func (*GetUnlockKeyResponse) Descriptor() ([]byte, []int) { return fileDescriptorCa, []int{7} }
+
 func init() {
 	proto.RegisterType((*NodeCertificateStatusRequest)(nil), "docker.swarmkit.v1.NodeCertificateStatusRequest")
 	proto.RegisterType((*NodeCertificateStatusResponse)(nil), "docker.swarmkit.v1.NodeCertificateStatusResponse")
@@ -96,6 +114,8 @@ func init() {
 	proto.RegisterType((*IssueNodeCertificateResponse)(nil), "docker.swarmkit.v1.IssueNodeCertificateResponse")
 	proto.RegisterType((*GetRootCACertificateRequest)(nil), "docker.swarmkit.v1.GetRootCACertificateRequest")
 	proto.RegisterType((*GetRootCACertificateResponse)(nil), "docker.swarmkit.v1.GetRootCACertificateResponse")
+	proto.RegisterType((*GetUnlockKeyRequest)(nil), "docker.swarmkit.v1.GetUnlockKeyRequest")
+	proto.RegisterType((*GetUnlockKeyResponse)(nil), "docker.swarmkit.v1.GetUnlockKeyResponse")
 }
 
 type authenticatedWrapperCAServer struct {
@@ -113,6 +133,14 @@ func NewAuthenticatedWrapperCAServer(local CAServer, authorize func(context.Cont
 func (p *authenticatedWrapperCAServer) GetRootCACertificate(ctx context.Context, r *GetRootCACertificateRequest) (*GetRootCACertificateResponse, error) {
 
 	return p.local.GetRootCACertificate(ctx, r)
+}
+
+func (p *authenticatedWrapperCAServer) GetUnlockKey(ctx context.Context, r *GetUnlockKeyRequest) (*GetUnlockKeyResponse, error) {
+
+	if err := p.authorize(ctx, []string{"swarm-manager"}); err != nil {
+		return nil, err
+	}
+	return p.local.GetUnlockKey(ctx, r)
 }
 
 type authenticatedWrapperNodeCAServer struct {
@@ -168,9 +196,10 @@ func (m *IssueNodeCertificateRequest) Copy() *IssueNodeCertificateRequest {
 	}
 
 	o := &IssueNodeCertificateRequest{
-		Role:  m.Role,
-		CSR:   m.CSR,
-		Token: m.Token,
+		Role:         m.Role,
+		CSR:          m.CSR,
+		Token:        m.Token,
+		Availability: m.Availability,
 	}
 
 	return o
@@ -211,6 +240,29 @@ func (m *GetRootCACertificateResponse) Copy() *GetRootCACertificateResponse {
 	return o
 }
 
+func (m *GetUnlockKeyRequest) Copy() *GetUnlockKeyRequest {
+	if m == nil {
+		return nil
+	}
+
+	o := &GetUnlockKeyRequest{}
+
+	return o
+}
+
+func (m *GetUnlockKeyResponse) Copy() *GetUnlockKeyResponse {
+	if m == nil {
+		return nil
+	}
+
+	o := &GetUnlockKeyResponse{
+		UnlockKey: m.UnlockKey,
+		Version:   *m.Version.Copy(),
+	}
+
+	return o
+}
+
 func (this *NodeCertificateStatusRequest) GoString() string {
 	if this == nil {
 		return "nil"
@@ -240,11 +292,12 @@ func (this *IssueNodeCertificateRequest) GoString() string {
 	if this == nil {
 		return "nil"
 	}
-	s := make([]string, 0, 7)
+	s := make([]string, 0, 8)
 	s = append(s, "&api.IssueNodeCertificateRequest{")
 	s = append(s, "Role: "+fmt.Sprintf("%#v", this.Role)+",\n")
 	s = append(s, "CSR: "+fmt.Sprintf("%#v", this.CSR)+",\n")
 	s = append(s, "Token: "+fmt.Sprintf("%#v", this.Token)+",\n")
+	s = append(s, "Availability: "+fmt.Sprintf("%#v", this.Availability)+",\n")
 	s = append(s, "}")
 	return strings.Join(s, "")
 }
@@ -275,6 +328,26 @@ func (this *GetRootCACertificateResponse) GoString() string {
 	s := make([]string, 0, 5)
 	s = append(s, "&api.GetRootCACertificateResponse{")
 	s = append(s, "Certificate: "+fmt.Sprintf("%#v", this.Certificate)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *GetUnlockKeyRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 4)
+	s = append(s, "&api.GetUnlockKeyRequest{")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *GetUnlockKeyResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 6)
+	s = append(s, "&api.GetUnlockKeyResponse{")
+	s = append(s, "UnlockKey: "+fmt.Sprintf("%#v", this.UnlockKey)+",\n")
+	s = append(s, "Version: "+strings.Replace(this.Version.GoString(), `&`, ``, 1)+",\n")
 	s = append(s, "}")
 	return strings.Join(s, "")
 }
@@ -317,6 +390,9 @@ const _ = grpc.SupportPackageIsVersion3
 
 type CAClient interface {
 	GetRootCACertificate(ctx context.Context, in *GetRootCACertificateRequest, opts ...grpc.CallOption) (*GetRootCACertificateResponse, error)
+	// GetUnlockKey returns the current unlock key for the cluster for the role of the client
+	// asking.
+	GetUnlockKey(ctx context.Context, in *GetUnlockKeyRequest, opts ...grpc.CallOption) (*GetUnlockKeyResponse, error)
 }
 
 type cAClient struct {
@@ -336,10 +412,22 @@ func (c *cAClient) GetRootCACertificate(ctx context.Context, in *GetRootCACertif
 	return out, nil
 }
 
+func (c *cAClient) GetUnlockKey(ctx context.Context, in *GetUnlockKeyRequest, opts ...grpc.CallOption) (*GetUnlockKeyResponse, error) {
+	out := new(GetUnlockKeyResponse)
+	err := grpc.Invoke(ctx, "/docker.swarmkit.v1.CA/GetUnlockKey", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Server API for CA service
 
 type CAServer interface {
 	GetRootCACertificate(context.Context, *GetRootCACertificateRequest) (*GetRootCACertificateResponse, error)
+	// GetUnlockKey returns the current unlock key for the cluster for the role of the client
+	// asking.
+	GetUnlockKey(context.Context, *GetUnlockKeyRequest) (*GetUnlockKeyResponse, error)
 }
 
 func RegisterCAServer(s *grpc.Server, srv CAServer) {
@@ -364,6 +452,24 @@ func _CA_GetRootCACertificate_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CA_GetUnlockKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUnlockKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CAServer).GetUnlockKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/docker.swarmkit.v1.CA/GetUnlockKey",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CAServer).GetUnlockKey(ctx, req.(*GetUnlockKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var _CA_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "docker.swarmkit.v1.CA",
 	HandlerType: (*CAServer)(nil),
@@ -371,6 +477,10 @@ var _CA_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRootCACertificate",
 			Handler:    _CA_GetRootCACertificate_Handler,
+		},
+		{
+			MethodName: "GetUnlockKey",
+			Handler:    _CA_GetUnlockKey_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -568,6 +678,11 @@ func (m *IssueNodeCertificateRequest) MarshalTo(data []byte) (int, error) {
 		i = encodeVarintCa(data, i, uint64(len(m.Token)))
 		i += copy(data[i:], m.Token)
 	}
+	if m.Availability != 0 {
+		data[i] = 0x20
+		i++
+		i = encodeVarintCa(data, i, uint64(m.Availability))
+	}
 	return i, nil
 }
 
@@ -639,6 +754,56 @@ func (m *GetRootCACertificateResponse) MarshalTo(data []byte) (int, error) {
 		i = encodeVarintCa(data, i, uint64(len(m.Certificate)))
 		i += copy(data[i:], m.Certificate)
 	}
+	return i, nil
+}
+
+func (m *GetUnlockKeyRequest) Marshal() (data []byte, err error) {
+	size := m.Size()
+	data = make([]byte, size)
+	n, err := m.MarshalTo(data)
+	if err != nil {
+		return nil, err
+	}
+	return data[:n], nil
+}
+
+func (m *GetUnlockKeyRequest) MarshalTo(data []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	return i, nil
+}
+
+func (m *GetUnlockKeyResponse) Marshal() (data []byte, err error) {
+	size := m.Size()
+	data = make([]byte, size)
+	n, err := m.MarshalTo(data)
+	if err != nil {
+		return nil, err
+	}
+	return data[:n], nil
+}
+
+func (m *GetUnlockKeyResponse) MarshalTo(data []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if len(m.UnlockKey) > 0 {
+		data[i] = 0xa
+		i++
+		i = encodeVarintCa(data, i, uint64(len(m.UnlockKey)))
+		i += copy(data[i:], m.UnlockKey)
+	}
+	data[i] = 0x12
+	i++
+	i = encodeVarintCa(data, i, uint64(m.Version.Size()))
+	n3, err := m.Version.MarshalTo(data[i:])
+	if err != nil {
+		return 0, err
+	}
+	i += n3
 	return i, nil
 }
 
@@ -763,6 +928,37 @@ func (p *raftProxyCAServer) GetRootCACertificate(ctx context.Context, r *GetRoot
 			return nil, err
 		}
 		return NewCAClient(conn).GetRootCACertificate(modCtx, r)
+	}
+	return resp, err
+}
+
+func (p *raftProxyCAServer) GetUnlockKey(ctx context.Context, r *GetUnlockKeyRequest) (*GetUnlockKeyResponse, error) {
+
+	conn, err := p.connSelector.LeaderConn(ctx)
+	if err != nil {
+		if err == raftselector.ErrIsLeader {
+			return p.local.GetUnlockKey(ctx, r)
+		}
+		return nil, err
+	}
+	modCtx, err := p.runCtxMods(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := NewCAClient(conn).GetUnlockKey(modCtx, r)
+	if err != nil {
+		if !strings.Contains(err.Error(), "is closing") && !strings.Contains(err.Error(), "the connection is unavailable") && !strings.Contains(err.Error(), "connection error") {
+			return resp, err
+		}
+		conn, err := p.pollNewLeaderConn(ctx)
+		if err != nil {
+			if err == raftselector.ErrIsLeader {
+				return p.local.GetUnlockKey(ctx, r)
+			}
+			return nil, err
+		}
+		return NewCAClient(conn).GetUnlockKey(modCtx, r)
 	}
 	return resp, err
 }
@@ -933,6 +1129,9 @@ func (m *IssueNodeCertificateRequest) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovCa(uint64(l))
 	}
+	if m.Availability != 0 {
+		n += 1 + sovCa(uint64(m.Availability))
+	}
 	return n
 }
 
@@ -962,6 +1161,24 @@ func (m *GetRootCACertificateResponse) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovCa(uint64(l))
 	}
+	return n
+}
+
+func (m *GetUnlockKeyRequest) Size() (n int) {
+	var l int
+	_ = l
+	return n
+}
+
+func (m *GetUnlockKeyResponse) Size() (n int) {
+	var l int
+	_ = l
+	l = len(m.UnlockKey)
+	if l > 0 {
+		n += 1 + l + sovCa(uint64(l))
+	}
+	l = m.Version.Size()
+	n += 1 + l + sovCa(uint64(l))
 	return n
 }
 
@@ -1007,6 +1224,7 @@ func (this *IssueNodeCertificateRequest) String() string {
 		`Role:` + fmt.Sprintf("%v", this.Role) + `,`,
 		`CSR:` + fmt.Sprintf("%v", this.CSR) + `,`,
 		`Token:` + fmt.Sprintf("%v", this.Token) + `,`,
+		`Availability:` + fmt.Sprintf("%v", this.Availability) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -1037,6 +1255,26 @@ func (this *GetRootCACertificateResponse) String() string {
 	}
 	s := strings.Join([]string{`&GetRootCACertificateResponse{`,
 		`Certificate:` + fmt.Sprintf("%v", this.Certificate) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *GetUnlockKeyRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&GetUnlockKeyRequest{`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *GetUnlockKeyResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&GetUnlockKeyResponse{`,
+		`UnlockKey:` + fmt.Sprintf("%v", this.UnlockKey) + `,`,
+		`Version:` + strings.Replace(strings.Replace(this.Version.String(), "Version", "Version", 1), `&`, ``, 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -1352,6 +1590,25 @@ func (m *IssueNodeCertificateRequest) Unmarshal(data []byte) error {
 			}
 			m.Token = string(data[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Availability", wireType)
+			}
+			m.Availability = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowCa
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[iNdEx]
+				iNdEx++
+				m.Availability |= (NodeSpec_Availability(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipCa(data[iNdEx:])
@@ -1602,6 +1859,167 @@ func (m *GetRootCACertificateResponse) Unmarshal(data []byte) error {
 	}
 	return nil
 }
+func (m *GetUnlockKeyRequest) Unmarshal(data []byte) error {
+	l := len(data)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowCa
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := data[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetUnlockKeyRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetUnlockKeyRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipCa(data[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthCa
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetUnlockKeyResponse) Unmarshal(data []byte) error {
+	l := len(data)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowCa
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := data[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetUnlockKeyResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetUnlockKeyResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field UnlockKey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowCa
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[iNdEx]
+				iNdEx++
+				byteLen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthCa
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.UnlockKey = append(m.UnlockKey[:0], data[iNdEx:postIndex]...)
+			if m.UnlockKey == nil {
+				m.UnlockKey = []byte{}
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowCa
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthCa
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.Version.Unmarshal(data[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipCa(data[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthCa
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func skipCa(data []byte) (n int, err error) {
 	l := len(data)
 	iNdEx := 0
@@ -1710,36 +2128,44 @@ var (
 func init() { proto.RegisterFile("ca.proto", fileDescriptorCa) }
 
 var fileDescriptorCa = []byte{
-	// 493 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x09, 0x6e, 0x88, 0x02, 0xff, 0x94, 0x94, 0xcf, 0x6e, 0xd3, 0x40,
-	0x10, 0xc6, 0xbb, 0x0e, 0xa4, 0x65, 0x52, 0x05, 0xb4, 0x04, 0x29, 0xa4, 0xa9, 0x53, 0x99, 0x03,
-	0x9c, 0x9c, 0xd6, 0x70, 0xe2, 0x44, 0x62, 0x24, 0x94, 0x03, 0x08, 0x6d, 0x1e, 0x00, 0xb9, 0xf6,
-	0x10, 0xac, 0x24, 0x5e, 0xe3, 0xdd, 0x80, 0xb8, 0x21, 0x81, 0x38, 0x70, 0x47, 0x70, 0xe2, 0x11,
-	0x78, 0x8e, 0x8a, 0x13, 0x47, 0x4e, 0x15, 0xf1, 0x03, 0x20, 0x1e, 0x01, 0xed, 0xda, 0x21, 0xfd,
-	0xb3, 0x89, 0xca, 0xc9, 0x3b, 0xb3, 0xf3, 0x7d, 0xfe, 0xed, 0x8c, 0xd7, 0xb0, 0x15, 0x06, 0x6e,
-	0x9a, 0x71, 0xc9, 0x29, 0x8d, 0x78, 0x38, 0xc6, 0xcc, 0x15, 0xaf, 0x83, 0x6c, 0x3a, 0x8e, 0xa5,
-	0xfb, 0xea, 0xa0, 0x55, 0x93, 0x6f, 0x52, 0x14, 0x45, 0x41, 0xab, 0x26, 0x52, 0x0c, 0x17, 0x41,
-	0x63, 0xc4, 0x47, 0x5c, 0x2f, 0xbb, 0x6a, 0x55, 0x66, 0xaf, 0xa7, 0x93, 0xd9, 0x28, 0x4e, 0xba,
-	0xc5, 0xa3, 0x48, 0x3a, 0x3e, 0xb4, 0x9f, 0xf0, 0x08, 0x7d, 0xcc, 0x64, 0xfc, 0x3c, 0x0e, 0x03,
-	0x89, 0x43, 0x19, 0xc8, 0x99, 0x60, 0xf8, 0x72, 0x86, 0x42, 0xd2, 0x5b, 0xb0, 0x99, 0xf0, 0x08,
-	0x9f, 0xc5, 0x51, 0x93, 0xec, 0x91, 0x3b, 0x57, 0xfa, 0x90, 0x1f, 0x77, 0xaa, 0x4a, 0x32, 0x78,
-	0xc8, 0xaa, 0x6a, 0x6b, 0x10, 0x39, 0x5f, 0x09, 0xec, 0xae, 0x70, 0x11, 0x29, 0x4f, 0x04, 0xd2,
-	0xfb, 0x50, 0x15, 0x3a, 0xa3, 0x5d, 0x6a, 0x9e, 0xe3, 0x9e, 0x3f, 0x90, 0x3b, 0x10, 0x62, 0x16,
-	0x24, 0xe1, 0x42, 0x5b, 0x2a, 0x68, 0x0f, 0x6a, 0xe1, 0xd2, 0xb8, 0x69, 0x69, 0x83, 0x8e, 0xc9,
-	0xe0, 0xc4, 0xfb, 0xd9, 0x49, 0x8d, 0xf3, 0x9e, 0xc0, 0x8e, 0x72, 0xc7, 0x33, 0x94, 0x8b, 0x53,
-	0xde, 0x83, 0x4b, 0x19, 0x9f, 0xa0, 0x86, 0xab, 0x7b, 0x6d, 0x93, 0xb7, 0x52, 0x32, 0x3e, 0xc1,
-	0xbe, 0xd5, 0x24, 0x4c, 0x57, 0xd3, 0x9b, 0x50, 0x09, 0x45, 0xa6, 0x81, 0xb6, 0xfb, 0x9b, 0xf9,
-	0x71, 0xa7, 0xe2, 0x0f, 0x19, 0x53, 0x39, 0xda, 0x80, 0xcb, 0x92, 0x8f, 0x31, 0x69, 0x56, 0x54,
-	0xd3, 0x58, 0x11, 0x38, 0x9f, 0x08, 0xb4, 0xcd, 0x18, 0x65, 0x9b, 0x2e, 0xd2, 0x6d, 0xfa, 0x14,
-	0xae, 0xea, 0xa2, 0x29, 0x4e, 0x0f, 0x31, 0x13, 0x2f, 0xe2, 0x54, 0x23, 0xd4, 0xbd, 0xdb, 0xab,
-	0xb8, 0x87, 0x29, 0x86, 0xee, 0xe3, 0x7f, 0xe5, 0xac, 0xae, 0xf4, 0xcb, 0xd8, 0xd9, 0x85, 0x9d,
-	0x47, 0x28, 0x19, 0xe7, 0xd2, 0xef, 0x9d, 0xef, 0x8e, 0xf3, 0x00, 0xda, 0xe6, 0xed, 0x92, 0x7a,
-	0xef, 0xf4, 0x80, 0x14, 0xf9, 0xf6, 0xa9, 0xfe, 0x7b, 0x1f, 0x09, 0x58, 0x7e, 0x8f, 0xbe, 0x23,
-	0xd0, 0x30, 0x39, 0xd1, 0xae, 0x89, 0x7c, 0x0d, 0x52, 0x6b, 0xff, 0xe2, 0x82, 0x02, 0xd2, 0xd9,
-	0xfa, 0xfe, 0xed, 0xf7, 0x17, 0xcb, 0xba, 0x46, 0xbc, 0xcf, 0x16, 0xe8, 0x96, 0x96, 0x40, 0xa6,
-	0x81, 0x98, 0x81, 0xd6, 0x7c, 0x41, 0x66, 0xa0, 0x75, 0xb3, 0x5e, 0x02, 0xd1, 0x0f, 0x04, 0x6e,
-	0x18, 0xaf, 0x0f, 0xdd, 0x5f, 0x35, 0xd1, 0x55, 0xf7, 0xb5, 0x75, 0xf0, 0x1f, 0x8a, 0xb3, 0x20,
-	0xfd, 0xf6, 0xd1, 0xdc, 0xde, 0xf8, 0x39, 0xb7, 0x37, 0xfe, 0xcc, 0x6d, 0xf2, 0x36, 0xb7, 0xc9,
-	0x51, 0x6e, 0x93, 0x1f, 0xb9, 0x4d, 0x7e, 0xe5, 0x36, 0x39, 0xac, 0xea, 0x3f, 0xc6, 0xdd, 0xbf,
-	0x01, 0x00, 0x00, 0xff, 0xff, 0xb3, 0xf8, 0x41, 0xef, 0x96, 0x04, 0x00, 0x00,
+	// 615 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x09, 0x6e, 0x88, 0x02, 0xff, 0x94, 0x54, 0xcd, 0x6e, 0xd3, 0x4c,
+	0x14, 0xed, 0xb8, 0xfd, 0xd2, 0xf6, 0x26, 0x5f, 0x8b, 0xa6, 0xad, 0x14, 0xd2, 0xd4, 0xa9, 0xcc,
+	0xa2, 0x65, 0x81, 0xd3, 0x06, 0x56, 0xb0, 0x21, 0x09, 0x52, 0x15, 0xa1, 0x22, 0x34, 0x11, 0x6c,
+	0x2b, 0xc7, 0x19, 0x82, 0x15, 0xc7, 0x63, 0x3c, 0xe3, 0x40, 0x76, 0x48, 0x20, 0xde, 0x00, 0xc1,
+	0x8a, 0x47, 0xe0, 0x39, 0x22, 0x56, 0x48, 0x6c, 0x58, 0x45, 0xc4, 0x0f, 0x80, 0x78, 0x04, 0xe4,
+	0xb1, 0x4d, 0xf3, 0xe3, 0x84, 0xb2, 0xf2, 0xcc, 0x9d, 0x73, 0xce, 0xbd, 0xf7, 0xcc, 0xf5, 0xc0,
+	0x86, 0x69, 0xe8, 0xae, 0xc7, 0x04, 0xc3, 0xb8, 0xcd, 0xcc, 0x2e, 0xf5, 0x74, 0xfe, 0xd2, 0xf0,
+	0x7a, 0x5d, 0x4b, 0xe8, 0xfd, 0xd3, 0x42, 0x56, 0x0c, 0x5c, 0xca, 0x23, 0x40, 0x21, 0xcb, 0x5d,
+	0x6a, 0x26, 0x9b, 0xdd, 0x0e, 0xeb, 0x30, 0xb9, 0x2c, 0x87, 0xab, 0x38, 0xba, 0xe3, 0xda, 0x7e,
+	0xc7, 0x72, 0xca, 0xd1, 0x27, 0x0a, 0x6a, 0x75, 0x28, 0x3e, 0x62, 0x6d, 0x5a, 0xa7, 0x9e, 0xb0,
+	0x9e, 0x59, 0xa6, 0x21, 0x68, 0x53, 0x18, 0xc2, 0xe7, 0x84, 0xbe, 0xf0, 0x29, 0x17, 0xf8, 0x06,
+	0xac, 0x3b, 0xac, 0x4d, 0x2f, 0xac, 0x76, 0x1e, 0x1d, 0xa2, 0xe3, 0xcd, 0x1a, 0x04, 0xa3, 0x52,
+	0x26, 0xa4, 0x34, 0x1e, 0x90, 0x4c, 0x78, 0xd4, 0x68, 0x6b, 0x9f, 0x10, 0x1c, 0x2c, 0x50, 0xe1,
+	0x2e, 0x73, 0x38, 0xc5, 0x77, 0x21, 0xc3, 0x65, 0x44, 0xaa, 0x64, 0x2b, 0x9a, 0x3e, 0xdf, 0x90,
+	0xde, 0xe0, 0xdc, 0x37, 0x1c, 0x33, 0xe1, 0xc6, 0x0c, 0x5c, 0x85, 0xac, 0x79, 0x29, 0x9c, 0x57,
+	0xa4, 0x40, 0x29, 0x4d, 0x60, 0x22, 0x3f, 0x99, 0xe4, 0x68, 0xdf, 0x10, 0xec, 0x87, 0xea, 0x74,
+	0xa6, 0xca, 0xa4, 0xcb, 0x3b, 0xb0, 0xe6, 0x31, 0x9b, 0xca, 0xe2, 0xb6, 0x2a, 0xc5, 0x34, 0xed,
+	0x90, 0x49, 0x98, 0x4d, 0x6b, 0x4a, 0x1e, 0x11, 0x89, 0xc6, 0xd7, 0x61, 0xd5, 0xe4, 0x9e, 0x2c,
+	0x28, 0x57, 0x5b, 0x0f, 0x46, 0xa5, 0xd5, 0x7a, 0x93, 0x90, 0x30, 0x86, 0x77, 0xe1, 0x3f, 0xc1,
+	0xba, 0xd4, 0xc9, 0xaf, 0x86, 0xa6, 0x91, 0x68, 0x83, 0xcf, 0x21, 0x67, 0xf4, 0x0d, 0xcb, 0x36,
+	0x5a, 0x96, 0x6d, 0x89, 0x41, 0x7e, 0x4d, 0xa6, 0xbb, 0xb9, 0x28, 0x5d, 0xd3, 0xa5, 0xa6, 0x5e,
+	0x9d, 0x20, 0x90, 0x29, 0xba, 0xf6, 0x1e, 0x41, 0x31, 0xbd, 0xab, 0xd8, 0xf5, 0xab, 0x5c, 0x1e,
+	0x7e, 0x0c, 0xdb, 0x12, 0xd4, 0xa3, 0xbd, 0x16, 0xf5, 0xf8, 0x73, 0xcb, 0x95, 0x1d, 0x6d, 0x55,
+	0x8e, 0x96, 0xd6, 0x75, 0xfe, 0x07, 0x4e, 0xb6, 0x42, 0xfe, 0xe5, 0x5e, 0x3b, 0x80, 0xfd, 0x33,
+	0x2a, 0x08, 0x63, 0xa2, 0x5e, 0x9d, 0x37, 0x5b, 0xbb, 0x0f, 0xc5, 0xf4, 0xe3, 0xb8, 0xea, 0xc3,
+	0xe9, 0xfb, 0x0e, 0x2b, 0xcf, 0x4d, 0x5f, 0xe7, 0x1e, 0xec, 0x9c, 0x51, 0xf1, 0xc4, 0xb1, 0x99,
+	0xd9, 0x7d, 0x48, 0x07, 0x89, 0xb0, 0x07, 0xbb, 0xd3, 0xe1, 0x58, 0xf0, 0x00, 0xc0, 0x97, 0xc1,
+	0x8b, 0x2e, 0x1d, 0xc4, 0x7a, 0x9b, 0x7e, 0x02, 0xc3, 0xf7, 0x60, 0xbd, 0x4f, 0x3d, 0x6e, 0x31,
+	0x27, 0x9e, 0xad, 0xfd, 0xb4, 0xc6, 0x9f, 0x46, 0x90, 0xda, 0xda, 0x70, 0x54, 0x5a, 0x21, 0x09,
+	0xa3, 0xf2, 0x56, 0x01, 0xa5, 0x5e, 0xc5, 0x6f, 0x90, 0xcc, 0x3d, 0xd7, 0x14, 0x2e, 0xa7, 0x69,
+	0x2d, 0x71, 0xa7, 0x70, 0x72, 0x75, 0x42, 0xd4, 0x9e, 0xb6, 0xf1, 0xe5, 0xf3, 0xcf, 0x8f, 0x8a,
+	0x72, 0x0d, 0xe1, 0x57, 0x90, 0x9b, 0x34, 0x00, 0x1f, 0x2d, 0xd0, 0x9a, 0x75, 0xae, 0x70, 0xfc,
+	0x77, 0x60, 0x9c, 0x6c, 0x4f, 0x26, 0xdb, 0x86, 0xff, 0x25, 0xf2, 0x56, 0xcf, 0x70, 0x8c, 0x0e,
+	0xf5, 0x2a, 0x1f, 0x14, 0x90, 0x73, 0x15, 0x5b, 0x91, 0x36, 0x95, 0xe9, 0x56, 0x2c, 0xf9, 0x2b,
+	0xd3, 0xad, 0x58, 0x36, 0xf0, 0x13, 0x56, 0xbc, 0x43, 0xb0, 0x97, 0xfa, 0x24, 0xe1, 0x93, 0x45,
+	0x63, 0xbd, 0xe8, 0x0d, 0x2c, 0x9c, 0xfe, 0x03, 0x63, 0xb6, 0x90, 0x5a, 0x71, 0x38, 0x56, 0x57,
+	0xbe, 0x8f, 0xd5, 0x95, 0x5f, 0x63, 0x15, 0xbd, 0x0e, 0x54, 0x34, 0x0c, 0x54, 0xf4, 0x35, 0x50,
+	0xd1, 0x8f, 0x40, 0x45, 0xad, 0x8c, 0x7c, 0x85, 0x6f, 0xff, 0x0e, 0x00, 0x00, 0xff, 0xff, 0xcf,
+	0xc4, 0x68, 0xc2, 0xea, 0x05, 0x00, 0x00,
 }

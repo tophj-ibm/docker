@@ -35,7 +35,7 @@ func TestNoneHealthcheck(t *testing.T) {
 
 	daemon.initHealthMonitor(c)
 	if c.State.Health != nil {
-		t.Errorf("Expecting Health to be nil, but was not")
+		t.Error("Expecting Health to be nil, but was not")
 	}
 }
 
@@ -80,7 +80,7 @@ func TestHealthStates(t *testing.T) {
 			Start:    startTime,
 			End:      startTime,
 			ExitCode: exitCode,
-		})
+		}, nil)
 	}
 
 	// starting -> failed -> success -> failed

@@ -210,8 +210,13 @@ func (daemon *Daemon) setRWLayer(container *container.Container) error {
 		layerID = img.RootFS.ChainID()
 	}
 
-	rwLayer, err := daemon.layerStore.CreateRWLayer(container.ID, layerID, container.MountLabel, daemon.getLayerInit(), container.HostConfig.StorageOpt)
+	rwLayerOpts := &layer.CreateRWLayerOpts{
+		MountLabel: container.MountLabel,
+		InitFunc:   daemon.getLayerInit(),
+		StorageOpt: container.HostConfig.StorageOpt,
+	}
 
+	rwLayer, err := daemon.layerStore.CreateRWLayer(container.ID, layerID, rwLayerOpts)
 	if err != nil {
 		return err
 	}
@@ -221,7 +226,7 @@ func (daemon *Daemon) setRWLayer(container *container.Container) error {
 }
 
 // VolumeCreate creates a volume with the specified name, driver, and opts
-// This is called directly from the remote API
+// This is called directly from the Engine API
 func (daemon *Daemon) VolumeCreate(name, driverName string, opts, labels map[string]string) (*types.Volume, error) {
 	if name == "" {
 		name = stringid.GenerateNonCryptoID()

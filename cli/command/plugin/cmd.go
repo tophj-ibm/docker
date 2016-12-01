@@ -1,8 +1,6 @@
 package plugin
 
 import (
-	"fmt"
-
 	"github.com/docker/docker/cli"
 	"github.com/docker/docker/cli/command"
 	"github.com/spf13/cobra"
@@ -14,10 +12,7 @@ func NewPluginCommand(dockerCli *command.DockerCli) *cobra.Command {
 		Use:   "plugin",
 		Short: "Manage plugins",
 		Args:  cli.NoArgs,
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintf(dockerCli.Err(), "\n"+cmd.UsageString())
-		},
-		Tags: map[string]string{"experimental": ""},
+		RunE:  dockerCli.ShowHelp,
 	}
 
 	cmd.AddCommand(
@@ -29,6 +24,7 @@ func NewPluginCommand(dockerCli *command.DockerCli) *cobra.Command {
 		newRemoveCommand(dockerCli),
 		newSetCommand(dockerCli),
 		newPushCommand(dockerCli),
+		newCreateCommand(dockerCli),
 	)
 	return cmd
 }

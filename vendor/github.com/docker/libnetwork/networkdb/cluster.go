@@ -45,6 +45,8 @@ func (l *logWriter) Write(p []byte) (int, error) {
 // SetKey adds a new key to the key ring
 func (nDB *NetworkDB) SetKey(key []byte) {
 	logrus.Debugf("Adding key %s", hex.EncodeToString(key)[0:5])
+	nDB.Lock()
+	defer nDB.Unlock()
 	for _, dbKey := range nDB.config.Keys {
 		if bytes.Equal(key, dbKey) {
 			return
@@ -60,6 +62,8 @@ func (nDB *NetworkDB) SetKey(key []byte) {
 // been added apriori through SetKey
 func (nDB *NetworkDB) SetPrimaryKey(key []byte) {
 	logrus.Debugf("Primary Key %s", hex.EncodeToString(key)[0:5])
+	nDB.RLock()
+	defer nDB.RUnlock()
 	for _, dbKey := range nDB.config.Keys {
 		if bytes.Equal(key, dbKey) {
 			if nDB.keyring != nil {
@@ -74,6 +78,8 @@ func (nDB *NetworkDB) SetPrimaryKey(key []byte) {
 // can't be the primary key
 func (nDB *NetworkDB) RemoveKey(key []byte) {
 	logrus.Debugf("Remove Key %s", hex.EncodeToString(key)[0:5])
+	nDB.Lock()
+	defer nDB.Unlock()
 	for i, dbKey := range nDB.config.Keys {
 		if bytes.Equal(key, dbKey) {
 			nDB.config.Keys = append(nDB.config.Keys[:i], nDB.config.Keys[i+1:]...)
@@ -139,7 +145,6 @@ func (nDB *NetworkDB) clusterInit() error {
 
 	nDB.stopCh = make(chan struct{})
 	nDB.memberlist = mlist
-	nDB.mConfig = config
 
 	for _, trigger := range []struct {
 		interval time.Duration
@@ -242,7 +247,7 @@ func (nDB *NetworkDB) reapDeadNode() {
 	defer nDB.Unlock()
 	for id, n := range nDB.failedNodes {
 		if n.reapTime > 0 {
-			n.reapTime -= reapPeriod
+			n.reapTime -= nodeReapPeriod
 			continue
 		}
 		logrus.Debugf("Removing failed node %v from gossip cluster", n.Name)

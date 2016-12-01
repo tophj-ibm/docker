@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/libnetwork/config"
 	"github.com/docker/libnetwork/datastore"
@@ -65,6 +65,7 @@ type NetworkInfo interface {
 	Scope() string
 	IPv6Enabled() bool
 	Internal() bool
+	Attachable() bool
 	Labels() map[string]string
 	Dynamic() bool
 	Created() time.Time
@@ -196,6 +197,7 @@ type network struct {
 	resolverOnce sync.Once
 	resolver     []Resolver
 	internal     bool
+	attachable   bool
 	inDelete     bool
 	ingress      bool
 	driverTables []string
@@ -348,6 +350,7 @@ func (n *network) CopyTo(o datastore.KVObject) error {
 	dstN.dbExists = n.dbExists
 	dstN.drvOnce = n.drvOnce
 	dstN.internal = n.internal
+	dstN.attachable = n.attachable
 	dstN.inDelete = n.inDelete
 	dstN.ingress = n.ingress
 
@@ -456,6 +459,7 @@ func (n *network) MarshalJSON() ([]byte, error) {
 		netMap["ipamV6Info"] = string(iis)
 	}
 	netMap["internal"] = n.internal
+	netMap["attachable"] = n.attachable
 	netMap["inDelete"] = n.inDelete
 	netMap["ingress"] = n.ingress
 	return json.Marshal(netMap)
@@ -473,7 +477,7 @@ func (n *network) UnmarshalJSON(b []byte) (err error) {
 	if v, ok := netMap["created"]; ok {
 		// n.created is time.Time but marshalled as string
 		if err = n.created.UnmarshalText([]byte(v.(string))); err != nil {
-			log.Warnf("failed to unmarshal creation time %v: %v", v, err)
+			logrus.Warnf("failed to unmarshal creation time %v: %v", v, err)
 			n.created = time.Time{}
 		}
 	}
@@ -549,6 +553,9 @@ func (n *network) UnmarshalJSON(b []byte) (err error) {
 	}
 	if v, ok := netMap["internal"]; ok {
 		n.internal = v.(bool)
+	}
+	if v, ok := netMap["attachable"]; ok {
+		n.attachable = v.(bool)
 	}
 	if s, ok := netMap["scope"]; ok {
 		n.scope = s.(string)
@@ -628,11 +635,21 @@ func NetworkOptionInternalNetwork() NetworkOption {
 	}
 }
 
+// NetworkOptionAttachable returns an option setter to set attachable for a network
+func NetworkOptionAttachable(attachable bool) NetworkOption {
+	return func(n *network) {
+		n.attachable = attachable
+	}
+}
+
 // NetworkOptionIpam function returns an option setter for the ipam configuration for this network
 func NetworkOptionIpam(ipamDriver string, addrSpace string, ipV4 []*IpamConf, ipV6 []*IpamConf, opts map[string]string) NetworkOption {
 	return func(n *network) {
 		if ipamDriver != "" {
 			n.ipamType = ipamDriver
+			if ipamDriver == ipamapi.DefaultIPAM {
+				n.ipamType = defaultIpamForNetworkType(n.Type())
+			}
 		}
 		n.ipamOptions = opts
 		n.addrSpace = addrSpace
@@ -776,12 +793,12 @@ func (n *network) delete(force bool) error {
 		if !force {
 			return err
 		}
-		log.Debugf("driver failed to delete stale network %s (%s): %v", n.Name(), n.ID(), err)
+		logrus.Debugf("driver failed to delete stale network %s (%s): %v", n.Name(), n.ID(), err)
 	}
 
 	n.ipamRelease()
 	if err = c.updateToStore(n); err != nil {
-		log.Warnf("Failed to update store after ipam release for network %s (%s): %v", n.Name(), n.ID(), err)
+		logrus.Warnf("Failed to update store after ipam release for network %s (%s): %v", n.Name(), n.ID(), err)
 	}
 
 	// We are about to delete the network. Leave the gossip
@@ -792,7 +809,7 @@ func (n *network) delete(force bool) error {
 	// bindings cleanup requires the network in the store.
 	n.cancelDriverWatches()
 	if err = n.leaveCluster(); err != nil {
-		log.Errorf("Failed leaving network %s from the agent cluster: %v", n.Name(), err)
+		logrus.Errorf("Failed leaving network %s from the agent cluster: %v", n.Name(), err)
 	}
 
 	c.cleanupServiceBindings(n.ID())
@@ -804,7 +821,7 @@ func (n *network) delete(force bool) error {
 		if !force {
 			return fmt.Errorf("error deleting network endpoint count from store: %v", err)
 		}
-		log.Debugf("Error deleting endpoint count from store for stale network %s (%s) for deletion: %v", n.Name(), n.ID(), err)
+		logrus.Debugf("Error deleting endpoint count from store for stale network %s (%s) for deletion: %v", n.Name(), n.ID(), err)
 	}
 
 	if err = c.deleteFromStore(n); err != nil {
@@ -827,7 +844,7 @@ func (n *network) deleteNetwork() error {
 		}
 
 		if _, ok := err.(types.MaskableError); !ok {
-			log.Warnf("driver error deleting network %s : %v", n.name, err)
+			logrus.Warnf("driver error deleting network %s : %v", n.name, err)
 		}
 	}
 
@@ -920,7 +937,7 @@ func (n *network) CreateEndpoint(name string, options ...EndpointOption) (Endpoi
 	defer func() {
 		if err != nil {
 			if e := ep.deleteEndpoint(false); e != nil {
-				log.Warnf("cleaning up endpoint failed %s : %v", name, e)
+				logrus.Warnf("cleaning up endpoint failed %s : %v", name, e)
 			}
 		}
 	}()
@@ -935,7 +952,7 @@ func (n *network) CreateEndpoint(name string, options ...EndpointOption) (Endpoi
 	defer func() {
 		if err != nil {
 			if e := n.getController().deleteFromStore(ep); e != nil {
-				log.Warnf("error rolling back endpoint %s from store: %v", name, e)
+				logrus.Warnf("error rolling back endpoint %s from store: %v", name, e)
 			}
 		}
 	}()
@@ -961,7 +978,7 @@ func (n *network) Endpoints() []Endpoint {
 
 	endpoints, err := n.getEndpointsFromStore()
 	if err != nil {
-		log.Error(err)
+		logrus.Error(err)
 	}
 
 	for _, ep := range endpoints {
@@ -1169,7 +1186,7 @@ func (n *network) getSvcRecords(ep *endpoint) []etchosts.Record {
 			continue
 		}
 		if len(ip) == 0 {
-			log.Warnf("Found empty list of IP addresses for service %s on network %s (%s)", h, n.name, n.id)
+			logrus.Warnf("Found empty list of IP addresses for service %s on network %s (%s)", h, n.name, n.id)
 			continue
 		}
 		recs = append(recs, etchosts.Record{
@@ -1253,7 +1270,7 @@ func (n *network) requestPoolHelper(ipam ipamapi.Ipam, addressSpace, preferredPo
 		// pools.
 		defer func() {
 			if err := ipam.ReleasePool(poolID); err != nil {
-				log.Warnf("Failed to release overlapping pool %s while returning from pool request helper for network %s", pool, n.Name())
+				logrus.Warnf("Failed to release overlapping pool %s while returning from pool request helper for network %s", pool, n.Name())
 			}
 		}()
 
@@ -1286,15 +1303,12 @@ func (n *network) ipamAllocateVersion(ipVer int, ipam ipamapi.Ipam) error {
 	}
 
 	if len(*cfgList) == 0 {
-		if ipVer == 6 {
-			return nil
-		}
 		*cfgList = []*IpamConf{{}}
 	}
 
 	*infoList = make([]*IpamInfo, len(*cfgList))
 
-	log.Debugf("Allocating IPv%d pools for network %s (%s)", ipVer, n.Name(), n.ID())
+	logrus.Debugf("Allocating IPv%d pools for network %s (%s)", ipVer, n.Name(), n.ID())
 
 	for i, cfg := range *cfgList {
 		if err = cfg.Validate(); err != nil {
@@ -1312,7 +1326,7 @@ func (n *network) ipamAllocateVersion(ipVer int, ipam ipamapi.Ipam) error {
 		defer func() {
 			if err != nil {
 				if err := ipam.ReleasePool(d.PoolID); err != nil {
-					log.Warnf("Failed to release address pool %s after failure to create network %s (%s)", d.PoolID, n.Name(), n.ID())
+					logrus.Warnf("Failed to release address pool %s after failure to create network %s (%s)", d.PoolID, n.Name(), n.ID())
 				}
 			}
 		}()
@@ -1364,7 +1378,7 @@ func (n *network) ipamRelease() {
 	}
 	ipam, _, err := n.getController().getIPAMDriver(n.ipamType)
 	if err != nil {
-		log.Warnf("Failed to retrieve ipam driver to release address pool(s) on delete of network %s (%s): %v", n.Name(), n.ID(), err)
+		logrus.Warnf("Failed to retrieve ipam driver to release address pool(s) on delete of network %s (%s): %v", n.Name(), n.ID(), err)
 		return
 	}
 	n.ipamReleaseVersion(4, ipam)
@@ -1380,7 +1394,7 @@ func (n *network) ipamReleaseVersion(ipVer int, ipam ipamapi.Ipam) {
 	case 6:
 		infoList = &n.ipamV6Info
 	default:
-		log.Warnf("incorrect ip version passed to ipam release: %d", ipVer)
+		logrus.Warnf("incorrect ip version passed to ipam release: %d", ipVer)
 		return
 	}
 
@@ -1388,25 +1402,25 @@ func (n *network) ipamReleaseVersion(ipVer int, ipam ipamapi.Ipam) {
 		return
 	}
 
-	log.Debugf("releasing IPv%d pools from network %s (%s)", ipVer, n.Name(), n.ID())
+	logrus.Debugf("releasing IPv%d pools from network %s (%s)", ipVer, n.Name(), n.ID())
 
 	for _, d := range *infoList {
 		if d.Gateway != nil {
 			if err := ipam.ReleaseAddress(d.PoolID, d.Gateway.IP); err != nil {
-				log.Warnf("Failed to release gateway ip address %s on delete of network %s (%s): %v", d.Gateway.IP, n.Name(), n.ID(), err)
+				logrus.Warnf("Failed to release gateway ip address %s on delete of network %s (%s): %v", d.Gateway.IP, n.Name(), n.ID(), err)
 			}
 		}
 		if d.IPAMData.AuxAddresses != nil {
 			for k, nw := range d.IPAMData.AuxAddresses {
 				if d.Pool.Contains(nw.IP) {
 					if err := ipam.ReleaseAddress(d.PoolID, nw.IP); err != nil && err != ipamapi.ErrIPOutOfRange {
-						log.Warnf("Failed to release secondary ip address %s (%v) on delete of network %s (%s): %v", k, nw.IP, n.Name(), n.ID(), err)
+						logrus.Warnf("Failed to release secondary ip address %s (%v) on delete of network %s (%s): %v", k, nw.IP, n.Name(), n.ID(), err)
 					}
 				}
 			}
 		}
 		if err := ipam.ReleasePool(d.PoolID); err != nil {
-			log.Warnf("Failed to release address pool %s on delete of network %s (%s): %v", d.PoolID, n.Name(), n.ID(), err)
+			logrus.Warnf("Failed to release address pool %s on delete of network %s (%s): %v", d.PoolID, n.Name(), n.ID(), err)
 		}
 	}
 
@@ -1471,17 +1485,12 @@ func (n *network) Peers() []networkdb.PeerInfo {
 		return []networkdb.PeerInfo{}
 	}
 
-	var nDB *networkdb.NetworkDB
-	n.ctrlr.Lock()
-	if n.ctrlr.agentInitDone == nil && n.ctrlr.agent != nil {
-		nDB = n.ctrlr.agent.networkDB
+	agent := n.getController().getAgent()
+	if agent == nil {
+		return []networkdb.PeerInfo{}
 	}
-	n.ctrlr.Unlock()
 
-	if nDB != nil {
-		return n.ctrlr.agent.networkDB.Peers(n.id)
-	}
-	return []networkdb.PeerInfo{}
+	return agent.networkDB.Peers(n.ID())
 }
 
 func (n *network) DriverOptions() map[string]string {
@@ -1550,6 +1559,13 @@ func (n *network) Internal() bool {
 	defer n.Unlock()
 
 	return n.internal
+}
+
+func (n *network) Attachable() bool {
+	n.Lock()
+	defer n.Unlock()
+
+	return n.attachable
 }
 
 func (n *network) Dynamic() bool {
@@ -1658,7 +1674,7 @@ func (n *network) ResolveService(name string) ([]*net.SRV, []net.IP) {
 	srv := []*net.SRV{}
 	ip := []net.IP{}
 
-	log.Debugf("Service name To resolve: %v", name)
+	logrus.Debugf("Service name To resolve: %v", name)
 
 	// There are DNS implementaions that allow SRV queries for names not in
 	// the format defined by RFC 2782. Hence specific validations checks are

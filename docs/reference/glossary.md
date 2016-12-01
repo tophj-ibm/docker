@@ -212,7 +212,7 @@ environment.
 
 ## service discovery
 
-Swarm mode [service discovery](https://docs.docker.com/engine/swarm/networking/) is a DNS component
+Swarm mode [service discovery](https://docs.docker.com/engine/swarm/networking/#use-swarm-mode-service-discovery) is a DNS component
 internal to the swarm that automatically assigns each service on an overlay
 network in the swarm a VIP and DNS entry. Containers on the network share DNS
 mappings for the service via gossip so any container on the network can access
@@ -226,7 +226,7 @@ automatically distributes requests to the service VIP among the active tasks.
 
 A [swarm](https://docs.docker.com/engine/swarm/) is a cluster of one or more Docker Engines running in [swarm mode](#swarm-mode).
 
-## Swarm
+## Docker Swarm
 
 Do not confuse [Docker Swarm](https://github.com/docker/swarm) with the [swarm mode](#swarm-mode) features in Docker Engine.
 
@@ -280,7 +280,7 @@ A virtual machine is a program that emulates a complete computer and imitates de
 It shares physical hardware resources with other users but isolates the operating system. The
 end user has the same experience on a Virtual Machine as they would have on dedicated hardware.
 
-Compared to to containers, a virtual machine is heavier to run, provides more isolation,
+Compared to containers, a virtual machine is heavier to run, provides more isolation,
 gets its own set of resources and does minimal sharing.
 
 *Also known as : VM*

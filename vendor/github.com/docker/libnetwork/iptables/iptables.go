@@ -16,6 +16,9 @@ import (
 // Action signifies the iptable action.
 type Action string
 
+// Policy is the default iptable policies
+type Policy string
+
 // Table refers to Nat, Filter or Mangle.
 type Table string
 
@@ -32,12 +35,17 @@ const (
 	Filter Table = "filter"
 	// Mangle table is used for mangling the packet.
 	Mangle Table = "mangle"
+	// Drop is the default iptables DROP policy
+	Drop Policy = "DROP"
+	// Accept is the default iptables ACCEPT policy
+	Accept Policy = "ACCEPT"
 )
 
 var (
 	iptablesPath  string
 	supportsXlock = false
 	supportsCOpt  = false
+	xLockWaitMsg  = "Another app is currently holding the xtables lock; waiting"
 	// used to lock iptables commands if xtables lock is not supported
 	bestEffortLock sync.Mutex
 	// ErrIptablesNotFound is returned when the rule is not found.
@@ -123,7 +131,7 @@ func NewChain(name string, table Table, hairpinMode bool) (*ChainInfo, error) {
 // ProgramChain is used to add rules to a chain
 func ProgramChain(c *ChainInfo, bridgeName string, hairpinMode, enable bool) error {
 	if c.Name == "" {
-		return fmt.Errorf("Could not program chain, missing chain name.")
+		return fmt.Errorf("Could not program chain, missing chain name")
 	}
 
 	switch c.Table {
@@ -159,7 +167,7 @@ func ProgramChain(c *ChainInfo, bridgeName string, hairpinMode, enable bool) err
 		}
 	case Filter:
 		if bridgeName == "" {
-			return fmt.Errorf("Could not program chain %s/%s, missing bridge name.",
+			return fmt.Errorf("Could not program chain %s/%s, missing bridge name",
 				c.Table, c.Name)
 		}
 		link := []string{
@@ -395,7 +403,7 @@ func raw(args ...string) ([]byte, error) {
 	}
 
 	// ignore iptables' message about xtables lock
-	if strings.Contains(string(output), "waiting for it to exit") {
+	if strings.Contains(string(output), xLockWaitMsg) {
 		output = []byte("")
 	}
 
@@ -435,6 +443,14 @@ func GetVersion() (major, minor, micro int, err error) {
 		major, minor, micro = parseVersionNumbers(string(out))
 	}
 	return
+}
+
+// SetDefaultPolicy sets the passed default policy for the table/chain
+func SetDefaultPolicy(table Table, chain string, policy Policy) error {
+	if err := RawCombinedOutput("-t", string(table), "-P", chain, string(policy)); err != nil {
+		return fmt.Errorf("setting default policy to %v in %v chain failed: %v", policy, chain, err)
+	}
+	return nil
 }
 
 func parseVersionNumbers(input string) (major, minor, micro int) {

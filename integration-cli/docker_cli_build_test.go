@@ -1865,6 +1865,10 @@ func (s *DockerSuite) TestBuildWindowsWorkdirProcessing(c *check.C) {
 func (s *DockerSuite) TestBuildWindowsAddCopyPathProcessing(c *check.C) {
 	testRequires(c, DaemonIsWindows)
 	name := "testbuildwindowsaddcopypathprocessing"
+	// TODO Windows (@jhowardmsft). Needs a follow-up PR to 22181 to
+	// support backslash such as .\\ being equivalent to ./ and c:\\ being
+	// equivalent to c:/. This is not currently (nor ever has been) supported
+	// by docker on the Windows platform.
 	dockerfile := `
 		FROM busybox
 			# No trailing slash on COPY/ADD
@@ -7172,31 +7176,6 @@ RUN echo vegeta
 	c.Assert(out, checker.Contains, "Step 3/3 : RUN echo vegeta")
 }
 
-// Verifies if COPY file . when WORKDIR is set to a non-existing directory,
-// the directory is created and the file is copied into the directory,
-// as opposed to the file being copied as a file with the name of the
-// directory. Fix for 27545 (found on Windows, but regression good for Linux too)
-func (s *DockerSuite) TestBuildCopyFileDotWithWorkdir(c *check.C) {
-	name := "testbuildcopyfiledotwithworkdir"
-
-	ctx, err := fakeContext(`FROM busybox
-WORKDIR /foo
-COPY file .
-RUN ["cat", "/foo/file"]
-`,
-		map[string]string{})
-	if err != nil {
-		c.Fatal(err)
-	}
-	defer ctx.Close()
-	if err := ctx.Add("file", "content"); err != nil {
-		c.Fatal(err)
-	}
-	if _, err = buildImageFromContext(name, ctx, true); err != nil {
-		c.Fatal(err)
-	}
-}
-
 func (s *DockerSuite) TestBuildSquashParent(c *check.C) {
 	testRequires(c, ExperimentalDaemon)
 	dockerFile := `
@@ -7266,4 +7245,85 @@ func (s *DockerSuite) TestBuildContChar(c *check.C) {
 	c.Assert(err, checker.IsNil)
 	c.Assert(out, checker.Contains, "Step 1/2 : FROM busybox")
 	c.Assert(out, checker.Contains, "Step 2/2 : RUN echo hi \\\\\n")
+}
+
+// TestBuildOpaqueDirectory tests that a build succeeds which
+// creates opaque directories.
+// See https://github.com/docker/docker/issues/25244
+func (s *DockerSuite) TestBuildOpaqueDirectory(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+
+	dockerFile := `
+		FROM busybox
+		RUN mkdir /dir1 && touch /dir1/f1
+		RUN rm -rf /dir1 && mkdir /dir1 && touch /dir1/f2
+		RUN touch /dir1/f3
+		RUN [ -f /dir1/f2 ]
+		`
+
+	// Test that build succeeds, last command fails if opaque directory
+	// was not handled correctly
+	_, err := buildImage("testopaquedirectory", dockerFile, false)
+	c.Assert(err, checker.IsNil)
+}
+
+// Windows test for USER in dockerfile
+func (s *DockerSuite) TestBuildWindowsUser(c *check.C) {
+	testRequires(c, DaemonIsWindows)
+	name := "testbuildwindowsuser"
+	_, out, err := buildImageWithOut(name,
+		`FROM `+WindowsBaseImage+`
+		RUN net user user /add
+		USER user
+		RUN set username
+		`,
+		true)
+	if err != nil {
+		c.Fatal(err)
+	}
+	c.Assert(strings.ToLower(out), checker.Contains, "username=user")
+}
+
+// Verifies if COPY file . when WORKDIR is set to a non-existing directory,
+// the directory is created and the file is copied into the directory,
+// as opposed to the file being copied as a file with the name of the
+// directory. Fix for 27545 (found on Windows, but regression good for Linux too).
+// Note 27545 was reverted in 28505, but a new fix was added subsequently in 28514.
+func (s *DockerSuite) TestBuildCopyFileDotWithWorkdir(c *check.C) {
+	name := "testbuildcopyfiledotwithworkdir"
+	ctx, err := fakeContext(`FROM busybox 
+WORKDIR /foo 
+COPY file . 
+RUN ["cat", "/foo/file"] 
+`,
+		map[string]string{})
+
+	if err != nil {
+		c.Fatal(err)
+	}
+	defer ctx.Close()
+
+	if err := ctx.Add("file", "content"); err != nil {
+		c.Fatal(err)
+	}
+
+	if _, err = buildImageFromContext(name, ctx, true); err != nil {
+		c.Fatal(err)
+	}
+}
+
+// Case-insensitive environment variables on Windows
+func (s *DockerSuite) TestBuildWindowsEnvCaseInsensitive(c *check.C) {
+	testRequires(c, DaemonIsWindows)
+	name := "testbuildwindowsenvcaseinsensitive"
+	if _, err := buildImage(name, `
+		FROM `+WindowsBaseImage+`
+		ENV FOO=bar foo=bar
+  `, true); err != nil {
+		c.Fatal(err)
+	}
+	res := inspectFieldJSON(c, name, "Config.Env")
+	if res != `["foo=bar"]` { // Should not have FOO=bar in it - takes the last one processed. And only one entry as deduped.
+		c.Fatalf("Case insensitive environment variables on Windows failed. Got %s", res)
+	}
 }

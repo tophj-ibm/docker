@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/oci"
 	"github.com/docker/docker/pkg/plugins"
 	"github.com/docker/docker/pkg/system"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
@@ -24,6 +25,7 @@ type Plugin struct {
 	Restart           bool            `json:"-"`
 	ExitChan          chan bool       `json:"-"`
 	LibRoot           string          `json:"-"`
+	TimeoutInSecs     int             `json:"-"`
 }
 
 const defaultPluginRuntimeDestination = "/run/docker/plugins"
@@ -73,7 +75,7 @@ func (p *Plugin) Name() string {
 // FilterByCap query the plugin for a given capability.
 func (p *Plugin) FilterByCap(capability string) (*Plugin, error) {
 	capability = strings.ToLower(capability)
-	for _, typ := range p.PluginObj.Manifest.Interface.Types {
+	for _, typ := range p.PluginObj.Config.Interface.Types {
 		if typ.Capability == capability && typ.Prefix == "docker" {
 			return p, nil
 		}
@@ -86,39 +88,41 @@ func (p *Plugin) RemoveFromDisk() error {
 	return os.RemoveAll(p.RuntimeSourcePath)
 }
 
-// InitPlugin populates the plugin object from the plugin manifest file.
+// InitPlugin populates the plugin object from the plugin config file.
 func (p *Plugin) InitPlugin() error {
-	dt, err := os.Open(filepath.Join(p.LibRoot, p.PluginObj.ID, "manifest.json"))
+	dt, err := os.Open(filepath.Join(p.LibRoot, p.PluginObj.ID, "config.json"))
 	if err != nil {
 		return err
 	}
-	err = json.NewDecoder(dt).Decode(&p.PluginObj.Manifest)
+	err = json.NewDecoder(dt).Decode(&p.PluginObj.Config)
 	dt.Close()
 	if err != nil {
 		return err
 	}
 
-	p.PluginObj.Config.Mounts = make([]types.PluginMount, len(p.PluginObj.Manifest.Mounts))
-	for i, mount := range p.PluginObj.Manifest.Mounts {
-		p.PluginObj.Config.Mounts[i] = mount
+	p.PluginObj.Settings.Mounts = make([]types.PluginMount, len(p.PluginObj.Config.Mounts))
+	for i, mount := range p.PluginObj.Config.Mounts {
+		p.PluginObj.Settings.Mounts[i] = mount
 	}
-	p.PluginObj.Config.Env = make([]string, 0, len(p.PluginObj.Manifest.Env))
-	for _, env := range p.PluginObj.Manifest.Env {
+	p.PluginObj.Settings.Env = make([]string, 0, len(p.PluginObj.Config.Env))
+	p.PluginObj.Settings.Devices = make([]types.PluginDevice, 0, len(p.PluginObj.Config.Linux.Devices))
+	copy(p.PluginObj.Settings.Devices, p.PluginObj.Config.Linux.Devices)
+	for _, env := range p.PluginObj.Config.Env {
 		if env.Value != nil {
-			p.PluginObj.Config.Env = append(p.PluginObj.Config.Env, fmt.Sprintf("%s=%s", env.Name, *env.Value))
+			p.PluginObj.Settings.Env = append(p.PluginObj.Settings.Env, fmt.Sprintf("%s=%s", env.Name, *env.Value))
 		}
 	}
-	copy(p.PluginObj.Config.Args, p.PluginObj.Manifest.Args.Value)
+	copy(p.PluginObj.Settings.Args, p.PluginObj.Config.Args.Value)
 
-	return p.writeConfig()
+	return p.writeSettings()
 }
 
-func (p *Plugin) writeConfig() error {
-	f, err := os.Create(filepath.Join(p.LibRoot, p.PluginObj.ID, "plugin-config.json"))
+func (p *Plugin) writeSettings() error {
+	f, err := os.Create(filepath.Join(p.LibRoot, p.PluginObj.ID, "plugin-settings.json"))
 	if err != nil {
 		return err
 	}
-	err = json.NewEncoder(f).Encode(&p.PluginObj.Config)
+	err = json.NewEncoder(f).Encode(&p.PluginObj.Settings)
 	f.Close()
 	return err
 }
@@ -137,11 +141,13 @@ func (p *Plugin) Set(args []string) error {
 		return err
 	}
 
+	// TODO(vieux): lots of code duplication here, needs to be refactored.
+
 next:
 	for _, s := range sets {
-		// range over all the envs in the manifest
-		for _, env := range p.PluginObj.Manifest.Env {
-			// found the env in the manifest
+		// range over all the envs in the config
+		for _, env := range p.PluginObj.Config.Env {
+			// found the env in the config
 			if env.Name == s.name {
 				// is it settable ?
 				if ok, err := s.isSettable(allowedSettableFieldsEnv, env.Settable); err != nil {
@@ -149,56 +155,109 @@ next:
 				} else if !ok {
 					return fmt.Errorf("%q is not settable", s.prettyName())
 				}
-				// is it, so lets update the config in memory
-				updateConfigEnv(&p.PluginObj.Config.Env, &s)
+				// is it, so lets update the settings in memory
+				updateSettingsEnv(&p.PluginObj.Settings.Env, &s)
 				continue next
 			}
 		}
 
-		//TODO: check devices, mount and args
+		// range over all the mounts in the config
+		for _, mount := range p.PluginObj.Config.Mounts {
+			// found the mount in the config
+			if mount.Name == s.name {
+				// is it settable ?
+				if ok, err := s.isSettable(allowedSettableFieldsMounts, mount.Settable); err != nil {
+					return err
+				} else if !ok {
+					return fmt.Errorf("%q is not settable", s.prettyName())
+				}
+
+				// it is, so lets update the settings in memory
+				*mount.Source = s.value
+				continue next
+			}
+		}
+
+		// range over all the devices in the config
+		for _, device := range p.PluginObj.Config.Linux.Devices {
+			// found the device in the config
+			if device.Name == s.name {
+				// is it settable ?
+				if ok, err := s.isSettable(allowedSettableFieldsDevices, device.Settable); err != nil {
+					return err
+				} else if !ok {
+					return fmt.Errorf("%q is not settable", s.prettyName())
+				}
+
+				// it is, so lets update the settings in memory
+				*device.Path = s.value
+				continue next
+			}
+		}
+
+		// found the name in the config
+		if p.PluginObj.Config.Args.Name == s.name {
+			// is it settable ?
+			if ok, err := s.isSettable(allowedSettableFieldsArgs, p.PluginObj.Config.Args.Settable); err != nil {
+				return err
+			} else if !ok {
+				return fmt.Errorf("%q is not settable", s.prettyName())
+			}
+
+			// it is, so lets update the settings in memory
+			p.PluginObj.Settings.Args = strings.Split(s.value, " ")
+			continue next
+		}
 
 		return fmt.Errorf("setting %q not found in the plugin configuration", s.name)
 	}
 
-	// update the config on disk
-	return p.writeConfig()
+	// update the settings on disk
+	return p.writeSettings()
 }
 
-// ComputePrivileges takes the manifest file and computes the list of access necessary
+// ComputePrivileges takes the config file and computes the list of access necessary
 // for the plugin on the host.
 func (p *Plugin) ComputePrivileges() types.PluginPrivileges {
-	m := p.PluginObj.Manifest
+	c := p.PluginObj.Config
 	var privileges types.PluginPrivileges
-	if m.Network.Type != "null" && m.Network.Type != "bridge" {
+	if c.Network.Type != "null" && c.Network.Type != "bridge" {
 		privileges = append(privileges, types.PluginPrivilege{
 			Name:        "network",
-			Description: "",
-			Value:       []string{m.Network.Type},
+			Description: "permissions to access a network",
+			Value:       []string{c.Network.Type},
 		})
 	}
-	for _, mount := range m.Mounts {
+	for _, mount := range c.Mounts {
 		if mount.Source != nil {
 			privileges = append(privileges, types.PluginPrivilege{
 				Name:        "mount",
-				Description: "",
+				Description: "host path to mount",
 				Value:       []string{*mount.Source},
 			})
 		}
 	}
-	for _, device := range m.Devices {
+	for _, device := range c.Linux.Devices {
 		if device.Path != nil {
 			privileges = append(privileges, types.PluginPrivilege{
 				Name:        "device",
-				Description: "",
+				Description: "host device to access",
 				Value:       []string{*device.Path},
 			})
 		}
 	}
-	if len(m.Capabilities) > 0 {
+	if c.Linux.DeviceCreation {
+		privileges = append(privileges, types.PluginPrivilege{
+			Name:        "device-creation",
+			Description: "allow creating devices inside plugin",
+			Value:       []string{"true"},
+		})
+	}
+	if len(c.Linux.Capabilities) > 0 {
 		privileges = append(privileges, types.PluginPrivilege{
 			Name:        "capabilities",
-			Description: "",
-			Value:       m.Capabilities,
+			Description: "list of additional capabilities required",
+			Value:       c.Linux.Capabilities,
 		})
 	}
 	return privileges
@@ -225,7 +284,7 @@ func (p *Plugin) GetSocket() string {
 	p.RLock()
 	defer p.RUnlock()
 
-	return p.PluginObj.Manifest.Interface.Socket
+	return p.PluginObj.Config.Interface.Socket
 }
 
 // GetTypes returns the interface types of a plugin.
@@ -233,7 +292,7 @@ func (p *Plugin) GetTypes() []types.PluginInterfaceType {
 	p.RLock()
 	defer p.RUnlock()
 
-	return p.PluginObj.Manifest.Interface.Types
+	return p.PluginObj.Config.Interface.Types
 }
 
 // InitSpec creates an OCI spec from the plugin's config.
@@ -241,7 +300,12 @@ func (p *Plugin) InitSpec(s specs.Spec, libRoot string) (*specs.Spec, error) {
 	rootfs := filepath.Join(libRoot, p.PluginObj.ID, "rootfs")
 	s.Root = specs.Root{
 		Path:     rootfs,
-		Readonly: false, // TODO: all plugins should be readonly? settable in manifest?
+		Readonly: false, // TODO: all plugins should be readonly? settable in config?
+	}
+
+	userMounts := make(map[string]struct{}, len(p.PluginObj.Config.Mounts))
+	for _, m := range p.PluginObj.Config.Mounts {
+		userMounts[m.Destination] = struct{}{}
 	}
 
 	mounts := append(p.PluginObj.Config.Mounts, types.PluginMount{
@@ -250,6 +314,29 @@ func (p *Plugin) InitSpec(s specs.Spec, libRoot string) (*specs.Spec, error) {
 		Type:        "bind",
 		Options:     []string{"rbind", "rshared"},
 	})
+
+	if p.PluginObj.Config.Network.Type != "" {
+		// TODO: if net == bridge, use libnetwork controller to create a new plugin-specific bridge, bind mount /etc/hosts and /etc/resolv.conf look at the docker code (allocateNetwork, initialize)
+		if p.PluginObj.Config.Network.Type == "host" {
+			oci.RemoveNamespace(&s, specs.NamespaceType("network"))
+		}
+		etcHosts := "/etc/hosts"
+		resolvConf := "/etc/resolv.conf"
+		mounts = append(mounts,
+			types.PluginMount{
+				Source:      &etcHosts,
+				Destination: etcHosts,
+				Type:        "bind",
+				Options:     []string{"rbind", "ro"},
+			},
+			types.PluginMount{
+				Source:      &resolvConf,
+				Destination: resolvConf,
+				Type:        "bind",
+				Options:     []string{"rbind", "ro"},
+			})
+	}
+
 	for _, mount := range mounts {
 		m := specs.Mount{
 			Destination: mount.Destination,
@@ -274,21 +361,43 @@ func (p *Plugin) InitSpec(s specs.Spec, libRoot string) (*specs.Spec, error) {
 		s.Mounts = append(s.Mounts, m)
 	}
 
-	envs := make([]string, 1, len(p.PluginObj.Config.Env)+1)
-	envs[0] = "PATH=" + system.DefaultPathEnv
-	envs = append(envs, p.PluginObj.Config.Env...)
+	for i, m := range s.Mounts {
+		if strings.HasPrefix(m.Destination, "/dev/") {
+			if _, ok := userMounts[m.Destination]; ok {
+				s.Mounts = append(s.Mounts[:i], s.Mounts[i+1:]...)
+			}
+		}
+	}
 
-	args := append(p.PluginObj.Manifest.Entrypoint, p.PluginObj.Config.Args...)
-	cwd := p.PluginObj.Manifest.Workdir
+	if p.PluginObj.Config.Linux.DeviceCreation {
+		rwm := "rwm"
+		s.Linux.Resources.Devices = []specs.DeviceCgroup{{Allow: true, Access: &rwm}}
+	}
+	for _, dev := range p.PluginObj.Config.Linux.Devices {
+		path := *dev.Path
+		d, dPermissions, err := oci.DevicesFromPath(path, path, "rwm")
+		if err != nil {
+			return nil, err
+		}
+		s.Linux.Devices = append(s.Linux.Devices, d...)
+		s.Linux.Resources.Devices = append(s.Linux.Resources.Devices, dPermissions...)
+	}
+
+	envs := make([]string, 1, len(p.PluginObj.Settings.Env)+1)
+	envs[0] = "PATH=" + system.DefaultPathEnv
+	envs = append(envs, p.PluginObj.Settings.Env...)
+
+	args := append(p.PluginObj.Config.Entrypoint, p.PluginObj.Settings.Args...)
+	cwd := p.PluginObj.Config.Workdir
 	if len(cwd) == 0 {
 		cwd = "/"
 	}
-	s.Process = specs.Process{
-		Terminal: false,
-		Args:     args,
-		Cwd:      cwd,
-		Env:      envs,
-	}
+	s.Process.Terminal = false
+	s.Process.Args = args
+	s.Process.Cwd = cwd
+	s.Process.Env = envs
+
+	s.Process.Capabilities = append(s.Process.Capabilities, p.PluginObj.Config.Linux.Capabilities...)
 
 	return &s, nil
 }

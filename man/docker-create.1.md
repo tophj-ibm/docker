@@ -31,7 +31,7 @@ docker-create - Create a new container
 [**--device-write-iops**[=*[]*]]
 [**--dns**[=*[]*]]
 [**--dns-search**[=*[]*]]
-[**--dns-opt**[=*[]*]]
+[**--dns-option**[=*[]*]]
 [**-e**|**--env**[=*[]*]]
 [**--entrypoint**[=*ENTRYPOINT*]]
 [**--env-file**[=*[]*]]
@@ -56,7 +56,6 @@ docker-create - Create a new container
 [**--memory-reservation**[=*MEMORY-RESERVATION*]]
 [**--memory-swap**[=*LIMIT*]]
 [**--memory-swappiness**[=*MEMORY-SWAPPINESS*]]
-[**--mount**[=*MOUNT*]]
 [**--name**[=*NAME*]]
 [**--network-alias**[=*[]*]]
 [**--network**[=*"bridge"*]]
@@ -190,7 +189,7 @@ two memory nodes.
 **--dns**=[]
    Set custom DNS servers
 
-**--dns-opt**=[]
+**--dns-option**=[]
    Set custom DNS options
 
 **--dns-search**=[]

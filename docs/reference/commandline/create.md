@@ -50,7 +50,7 @@ Options:
       --device-write-iops value     Limit write rate (IO per second) to a device (default [])
       --disable-content-trust       Skip image verification (default true)
       --dns value                   Set custom DNS servers (default [])
-      --dns-opt value               Set DNS options (default [])
+      --dns-option value            Set DNS options (default [])
       --dns-search value            Set custom DNS search domains (default [])
       --entrypoint string           Overwrite the default ENTRYPOINT of the image
   -e, --env value                   Set environment variables (default [])
@@ -58,9 +58,9 @@ Options:
       --expose value                Expose a port or a range of ports (default [])
       --group-add value             Add additional groups to join (default [])
       --health-cmd string           Command to run to check health
-      --health-interval duration    Time between running the check
+      --health-interval duration    Time between running the check (ns|us|ms|s|m|h) (default 0s)
       --health-retries int          Consecutive failures needed to report unhealthy
-      --health-timeout duration     Maximum time to allow one check to run
+      --health-timeout duration     Maximum time to allow one check to run (ns|us|ms|s|m|h) (default 0s)
       --help                        Print usage
   -h, --hostname string             Container host name
   -i, --interactive                 Keep STDIN open even if not attached
@@ -82,7 +82,6 @@ Options:
       --memory-reservation string   Memory soft limit
       --memory-swap string          Swap limit equal to memory plus swap: '-1' to enable unlimited swap
       --memory-swappiness int       Tune container memory swappiness (0 to 100) (default -1)
-      --mount value                 Attach a filesytem mount to the container (default [])
       --name string                 Assign a name to the container
       --network-alias value         Add network-scoped alias for the container (default [])
       --network string              Connect a container to a network (default "default")

@@ -54,7 +54,7 @@ Options:
       --device-write-iops value     Limit write rate (IO per second) to a device (default [])
       --disable-content-trust       Skip image verification (default true)
       --dns value                   Set custom DNS servers (default [])
-      --dns-opt value               Set DNS options (default [])
+      --dns-option value            Set DNS options (default [])
       --dns-search value            Set custom DNS search domains (default [])
       --entrypoint string           Overwrite the default ENTRYPOINT of the image
   -e, --env value                   Set environment variables (default [])
@@ -62,9 +62,9 @@ Options:
       --expose value                Expose a port or a range of ports (default [])
       --group-add value             Add additional groups to join (default [])
       --health-cmd string           Command to run to check health
-      --health-interval duration    Time between running the check
+      --health-interval duration    Time between running the check (ns|us|ms|s|m|h) (default 0s)
       --health-retries int          Consecutive failures needed to report unhealthy
-      --health-timeout duration     Maximum time to allow one check to run
+      --health-timeout duration     Maximum time to allow one check to run (ns|us|ms|s|m|h) (default 0s)
       --help                        Print usage
   -h, --hostname string             Container host name
   -i, --interactive                 Keep STDIN open even if not attached
@@ -92,7 +92,6 @@ Options:
       --memory-reservation string   Memory soft limit
       --memory-swap string          Swap limit equal to memory plus swap: '-1' to enable unlimited swap
       --memory-swappiness int       Tune container memory swappiness (0 to 100) (default -1)
-      --mount value                 Attach a filesystem mount to the container (default [])
       --name string                 Assign a name to the container
       --network-alias value         Add network-scoped alias for the container (default [])
       --network string              Connect a container to a network
@@ -262,22 +261,27 @@ https://docs.docker.com/engine/installation/binaries/#/get-the-linux-binary)),
 you give the container the full access to create and manipulate the host's
 Docker daemon.
 
+On Windows, the paths must be specified using Windows-style semantics. 
+
+    PS C:\> docker run -v c:\foo:c:\dest microsoft/nanoserver cmd /s /c type c:\dest\somefile.txt
+    Contents of file
+	
+    PS C:\> docker run -v c:\foo:d: microsoft/nanoserver cmd /s /c type d:\somefile.txt
+    Contents of file
+
+The following examples will fail when using Windows-based containers, as the 
+destination of a volume or bind-mount inside the container must be one of: 
+a non-existing or empty directory; or a drive other than C:. Further, the source
+of a bind mount must be a local directory, not a file.
+
+    net use z: \\remotemachine\share
+    docker run -v z:\foo:c:\dest ...
+    docker run -v \\uncpath\to\directory:c:\dest ...
+    docker run -v c:\foo\somefile.txt:c:\dest ...
+    docker run -v c:\foo:c: ...
+    docker run -v c:\foo:c:\existing-directory-with-contents ...
+
 For in-depth information about volumes, refer to [manage data in containers](https://docs.docker.com/engine/tutorials/dockervolumes/)
-
-### Add bin-mounts or volumes using the --mounts flag
-
-The `--mounts` flag allows you to mount volumes, host-directories and `tmpfs`
-mounts in a container.
-
-The `--mount` flag supports most options that are supported by the `-v` or the
-`--volume` flag, but uses a different syntax. For in-depth information on the
-`--mount` flag, and a comparison between `--volume` and `--mount`, refer to
-the [service create command reference](service_create.md#add-bind-mounts-or-volumes).
-
-Examples:
-
-    $ docker run --read-only --mount type=volume,target=/icanwrite busybox touch /icanwrite/here
-    $ docker run -t -i --mount type=bind,src=/data,dst=/data busybox sh
 
 ### Publish or expose port (-p, --expose)
 
@@ -658,7 +662,7 @@ The `credentialspec` must be in the format `file://spec.txt` or `registry://keyn
 
 ### Stop container with timeout (--stop-timeout)
 
-The `--stop-timeout` flag sets the the timeout (in seconds) that a pre-defined (see `--stop-signal`) system call
+The `--stop-timeout` flag sets the timeout (in seconds) that a pre-defined (see `--stop-signal`) system call
 signal that will be sent to the container to exit. After timeout elapses the container will be killed with SIGKILL.
 
 ### Specify isolation technology for container (--isolation)

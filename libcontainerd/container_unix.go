@@ -15,7 +15,7 @@ import (
 	"github.com/Sirupsen/logrus"
 	containerd "github.com/docker/containerd/api/grpc/types"
 	"github.com/docker/docker/pkg/ioutils"
-	"github.com/opencontainers/runtime-spec/specs-go"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/tonistiigi/fifo"
 	"golang.org/x/net/context"
 )
@@ -70,7 +70,7 @@ func (ctr *container) clean() error {
 func (ctr *container) cleanProcess(id string) {
 	if p, ok := ctr.processes[id]; ok {
 		for _, i := range []int{syscall.Stdin, syscall.Stdout, syscall.Stderr} {
-			if err := os.Remove(p.fifo(i)); err != nil {
+			if err := os.Remove(p.fifo(i)); err != nil && !os.IsNotExist(err) {
 				logrus.Warnf("libcontainerd: failed to remove %v for process %v: %v", p.fifo(i), id, err)
 			}
 		}
@@ -118,10 +118,14 @@ func (ctr *container) start(checkpoint string, checkpointDir string, attachStdio
 			go func() {
 				select {
 				case <-ready:
+				case <-ctx.Done():
+				}
+				select {
+				case <-ready:
 					if err := ctr.sendCloseStdin(); err != nil {
 						logrus.Warnf("failed to close stdin: %+v", err)
 					}
-				case <-ctx.Done():
+				default:
 				}
 			}()
 		})

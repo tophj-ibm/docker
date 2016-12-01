@@ -6,7 +6,7 @@ import (
 	"sync"
 	"syscall"
 
-	log "github.com/Sirupsen/logrus"
+	"github.com/Sirupsen/logrus"
 )
 
 const ovPeerTable = "overlay_peer_table"
@@ -90,7 +90,7 @@ func (d *driver) peerDbNetworkWalk(nid string, f func(*peerKey, *peerEntry) bool
 	for pKeyStr, pEntry := range pMap.mp {
 		var pKey peerKey
 		if _, err := fmt.Sscan(pKeyStr, &pKey); err != nil {
-			log.Warnf("Peer key scan on network %s failed: %v", nid, err)
+			logrus.Warnf("Peer key scan on network %s failed: %v", nid, err)
 		}
 
 		if f(&pKey, &pEntry) {
@@ -277,7 +277,7 @@ func (d *driver) peerAdd(nid, eid string, peerIP net.IP, peerIPMask net.IPMask,
 
 	s := n.getSubnetforIP(IP)
 	if s == nil {
-		return fmt.Errorf("couldn't find the subnet %q in network %q\n", IP.String(), n.id)
+		return fmt.Errorf("couldn't find the subnet %q in network %q", IP.String(), n.id)
 	}
 
 	if err := n.obtainVxlanID(s); err != nil {
@@ -289,7 +289,7 @@ func (d *driver) peerAdd(nid, eid string, peerIP net.IP, peerIPMask net.IPMask,
 	}
 
 	if err := d.checkEncryption(nid, vtep, n.vxlanID(s), false, true); err != nil {
-		log.Warn(err)
+		logrus.Warn(err)
 	}
 
 	// Add neighbor entry for the peer IP
@@ -349,7 +349,7 @@ func (d *driver) peerDelete(nid, eid string, peerIP net.IP, peerIPMask net.IPMas
 	}
 
 	if err := d.checkEncryption(nid, vtep, 0, false, false); err != nil {
-		log.Warn(err)
+		logrus.Warn(err)
 	}
 
 	return nil

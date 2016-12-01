@@ -25,15 +25,14 @@
 
 FROM debian:jessie
 
+# allow replacing httpredir or deb mirror
+ARG APT_MIRROR=deb.debian.org
+RUN sed -ri "s/(httpredir|deb).debian.org/$APT_MIRROR/g" /etc/apt/sources.list
+
 # Add zfs ppa
 RUN apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys E871F18B51E0147C77796AC81196BA81F6B0FC61 \
 	|| apt-key adv --keyserver hkp://pgp.mit.edu:80 --recv-keys E871F18B51E0147C77796AC81196BA81F6B0FC61
 RUN echo deb http://ppa.launchpad.net/zfs-native/stable/ubuntu trusty main > /etc/apt/sources.list.d/zfs.list
-
-
-# Allow replacing httpredir mirror
-ARG APT_MIRROR=httpredir.debian.org
-RUN sed -i s/httpredir.debian.org/$APT_MIRROR/g /etc/apt/sources.list
 
 # Packaged dependencies
 RUN apt-get update && apt-get install -y \
@@ -47,6 +46,7 @@ RUN apt-get update && apt-get install -y \
 	btrfs-tools \
 	build-essential \
 	clang \
+	cmake \
 	createrepo \
 	curl \
 	dpkg-sig \
@@ -54,6 +54,7 @@ RUN apt-get update && apt-get install -y \
 	git \
 	iptables \
 	jq \
+	less \
 	libapparmor-dev \
 	libcap-dev \
 	libltdl-dev \
@@ -63,6 +64,7 @@ RUN apt-get update && apt-get install -y \
 	libsqlite3-dev \
 	libsystemd-journal-dev \
 	libtool \
+	libzfs-dev \
 	mercurial \
 	net-tools \
 	pkg-config \
@@ -72,10 +74,11 @@ RUN apt-get update && apt-get install -y \
 	python-mock \
 	python-pip \
 	python-websocket \
-	ubuntu-zfs \
-	xfsprogs \
-	libzfs-dev \
 	tar \
+	ubuntu-zfs \
+	vim \
+	vim-common \
+	xfsprogs \
 	zip \
 	--no-install-recommends \
 	&& pip install awscli==1.10.15
@@ -232,10 +235,11 @@ RUN ./contrib/download-frozen-image-v2.sh /docker-frozen-images \
 	hello-world:latest@sha256:8be990ef2aeb16dbcb9271ddfe2610fa6658d13f6dfb8bc72074cc1ca36966a7
 # See also "hack/make/.ensure-frozen-images" (which needs to be updated any time this list is)
 
-# Install tomlv, vndr, runc, containerd, grimes, docker-proxy
+# Install tomlv, vndr, runc, containerd, tini, docker-proxy
 # Please edit hack/dockerfile/install-binaries.sh to update them.
+COPY hack/dockerfile/binaries-commits /tmp/binaries-commits
 COPY hack/dockerfile/install-binaries.sh /tmp/install-binaries.sh
-RUN /tmp/install-binaries.sh tomlv vndr runc containerd grimes proxy
+RUN /tmp/install-binaries.sh tomlv vndr runc containerd tini proxy
 
 # Wrap all commands in the "docker-in-docker" script to allow nested containers
 ENTRYPOINT ["hack/dind"]

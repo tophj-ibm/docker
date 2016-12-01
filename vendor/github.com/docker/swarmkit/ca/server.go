@@ -69,6 +69,33 @@ func (s *Server) SetReconciliationRetryInterval(reconciliationRetryInterval time
 	s.reconciliationRetryInterval = reconciliationRetryInterval
 }
 
+// GetUnlockKey is responsible for returning the current unlock key used for encrypting TLS private keys and
+// other at rest data.  Access to this RPC call should only be allowed via mutual TLS from managers.
+func (s *Server) GetUnlockKey(ctx context.Context, request *api.GetUnlockKeyRequest) (*api.GetUnlockKeyResponse, error) {
+	// This directly queries the store, rather than storing the unlock key and version on
+	// the `Server` object and updating it `updateCluster` is called, because we need this
+	// API to return the latest version of the key.  Otherwise, there might be a slight delay
+	// between when the cluster gets updated, and when this function returns the latest key.
+	// This delay is currently unacceptable because this RPC call is the only way, after a
+	// cluster update, to get the actual value of the unlock key, and we don't want to return
+	// a cached value.
+	resp := api.GetUnlockKeyResponse{}
+	s.store.View(func(tx store.ReadTx) {
+		cluster := store.GetCluster(tx, s.securityConfig.ClientTLSCreds.Organization())
+		resp.Version = cluster.Meta.Version
+		if cluster.Spec.EncryptionConfig.AutoLockManagers {
+			for _, encryptionKey := range cluster.UnlockKeys {
+				if encryptionKey.Subsystem == ManagerRole {
+					resp.UnlockKey = encryptionKey.Key
+					return
+				}
+			}
+		}
+	})
+
+	return &resp, nil
+}
+
 // NodeCertificateStatus returns the current issuance status of an issuance request identified by the nodeID
 func (s *Server) NodeCertificateStatus(ctx context.Context, request *api.NodeCertificateStatusRequest) (*api.NodeCertificateStatusResponse, error) {
 	if request.NodeID == "" {
@@ -233,8 +260,9 @@ func (s *Server) IssueNodeCertificate(ctx context.Context, request *api.IssueNod
 					},
 				},
 				Spec: api.NodeSpec{
-					Role:       role,
-					Membership: api.NodeMembershipAccepted,
+					Role:         role,
+					Membership:   api.NodeMembershipAccepted,
+					Availability: request.Availability,
 				},
 			}
 
@@ -590,7 +618,7 @@ func (s *Server) signNodeCert(ctx context.Context, node *api.Node) error {
 	)
 
 	// Try using the external CA first.
-	cert, err := externalCA.Sign(PrepareCSR(rawCSR, cn, ou, org))
+	cert, err := externalCA.Sign(ctx, PrepareCSR(rawCSR, cn, ou, org))
 	if err == ErrNoExternalCAURLs {
 		// No external CA servers configured. Try using the local CA.
 		cert, err = rootCA.ParseValidateAndSignCSR(rawCSR, cn, ou, org)

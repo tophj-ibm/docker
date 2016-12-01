@@ -1,11 +1,11 @@
 package controlapi
 
 import (
+	"crypto/subtle"
 	"regexp"
 	"strings"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/distribution/digest"
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/identity"
 	"github.com/docker/swarmkit/log"
@@ -25,10 +25,8 @@ var validSecretNameRegexp = regexp.MustCompile(`^[a-zA-Z0-9]+(?:[a-zA-Z0-9-_.]*[
 // assumes spec is not nil
 func secretFromSecretSpec(spec *api.SecretSpec) *api.Secret {
 	return &api.Secret{
-		ID:         identity.NewID(),
-		Spec:       *spec,
-		SecretSize: int64(len(spec.Data)),
-		Digest:     digest.FromBytes(spec.Data).String(),
+		ID:   identity.NewID(),
+		Spec: *spec,
 	}
 }
 
@@ -71,7 +69,10 @@ func (s *Server) UpdateSecret(ctx context.Context, request *api.UpdateSecretRequ
 			return nil
 		}
 
-		if secret.Spec.Annotations.Name != request.Spec.Annotations.Name || request.Spec.Data != nil {
+		// Check if the Name is different than the current name, or the secret is non-nil and different
+		// than the current secret
+		if secret.Spec.Annotations.Name != request.Spec.Annotations.Name ||
+			(request.Spec.Data != nil && subtle.ConstantTimeCompare(request.Spec.Data, secret.Spec.Data) == 0) {
 			return grpc.Errorf(codes.InvalidArgument, "only updates to Labels are allowed")
 		}
 

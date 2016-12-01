@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 	"sync/atomic"
 	"time"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/dockerversion"
@@ -68,29 +70,26 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 		}
 	})
 
-	securityOptions := []types.SecurityOpt{}
+	securityOptions := []string{}
 	if sysInfo.AppArmor {
-		securityOptions = append(securityOptions, types.SecurityOpt{Key: "Name", Value: "apparmor"})
+		securityOptions = append(securityOptions, "name=apparmor")
 	}
 	if sysInfo.Seccomp && supportsSeccomp {
 		profile := daemon.seccompProfilePath
 		if profile == "" {
 			profile = "default"
 		}
-		securityOptions = append(securityOptions,
-			types.SecurityOpt{Key: "Name", Value: "seccomp"},
-			types.SecurityOpt{Key: "Profile", Value: profile},
-		)
+		securityOptions = append(securityOptions, fmt.Sprintf("name=seccomp,profile=%s", profile))
 	}
 	if selinuxEnabled() {
-		securityOptions = append(securityOptions, types.SecurityOpt{Key: "Name", Value: "selinux"})
+		securityOptions = append(securityOptions, "name=selinux")
 	}
 	uid, gid := daemon.GetRemappedUIDGID()
 	if uid != 0 || gid != 0 {
-		securityOptions = append(securityOptions, types.SecurityOpt{Key: "Name", Value: "userns"})
+		securityOptions = append(securityOptions, "name=userns")
 	}
 
-	v := &types.InfoBase{
+	v := &types.Info{
 		ID:                 daemon.ID,
 		Containers:         int(cRunning + cPaused + cStopped),
 		ContainersRunning:  int(cRunning),
@@ -128,25 +127,12 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 		HTTPSProxy:         sockets.GetProxyEnv("https_proxy"),
 		NoProxy:            sockets.GetProxyEnv("no_proxy"),
 		LiveRestoreEnabled: daemon.configStore.LiveRestoreEnabled,
+		SecurityOptions:    securityOptions,
 		Isolation:          daemon.defaultIsolation,
 	}
 
-	// TODO Windows. Refactor this more once sysinfo is refactored into
-	// platform specific code. On Windows, sysinfo.cgroupMemInfo and
-	// sysinfo.cgroupCpuInfo will be nil otherwise and cause a SIGSEGV if
-	// an attempt is made to access through them.
-	if runtime.GOOS != "windows" {
-		v.MemoryLimit = sysInfo.MemoryLimit
-		v.SwapLimit = sysInfo.SwapLimit
-		v.KernelMemory = sysInfo.KernelMemory
-		v.OomKillDisable = sysInfo.OomKillDisable
-		v.CPUCfsPeriod = sysInfo.CPUCfsPeriod
-		v.CPUCfsQuota = sysInfo.CPUCfsQuota
-		v.CPUShares = sysInfo.CPUShares
-		v.CPUSet = sysInfo.Cpuset
-		v.Runtimes = daemon.configStore.GetAllRuntimes()
-		v.DefaultRuntime = daemon.configStore.GetDefaultRuntimeName()
-	}
+	// Retrieve platform specific info
+	daemon.FillPlatformInfo(v, sysInfo)
 
 	hostname := ""
 	if hn, err := os.Hostname(); err != nil {
@@ -156,24 +142,20 @@ func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 	}
 	v.Name = hostname
 
-	i := &types.Info{
-		InfoBase:        v,
-		SecurityOptions: securityOptions,
-	}
-
-	return i, nil
+	return v, nil
 }
 
 // SystemVersion returns version information about the daemon.
 func (daemon *Daemon) SystemVersion() types.Version {
 	v := types.Version{
-		Version:      dockerversion.Version,
-		GitCommit:    dockerversion.GitCommit,
-		GoVersion:    runtime.Version(),
-		Os:           runtime.GOOS,
-		Arch:         runtime.GOARCH,
-		BuildTime:    dockerversion.BuildTime,
-		Experimental: daemon.configStore.Experimental,
+		Version:       dockerversion.Version,
+		GitCommit:     dockerversion.GitCommit,
+		MinAPIVersion: api.MinVersion,
+		GoVersion:     runtime.Version(),
+		Os:            runtime.GOOS,
+		Arch:          runtime.GOARCH,
+		BuildTime:     dockerversion.BuildTime,
+		Experimental:  daemon.configStore.Experimental,
 	}
 
 	kernelVersion := "<unknown>"

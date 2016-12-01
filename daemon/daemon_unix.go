@@ -4,7 +4,6 @@ package daemon
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -112,9 +111,7 @@ func getCPUResources(config containertypes.Resources) *specs.CPU {
 	}
 
 	if config.NanoCPUs > 0 {
-		// Use the default setting of 100ms, as is specified in:
 		// https://www.kernel.org/doc/Documentation/scheduler/sched-bwc.txt
-		//    	cpu.cfs_period_us=100ms
 		period := uint64(100 * time.Millisecond / time.Microsecond)
 		quota := uint64(config.NanoCPUs) * period / 1e9
 		cpu.Period = &period
@@ -361,8 +358,15 @@ func verifyContainerResources(resources *containertypes.Resources, sysInfo *sysi
 	if resources.NanoCPUs > 0 && (!sysInfo.CPUCfsPeriod || !sysInfo.CPUCfsQuota) {
 		return warnings, fmt.Errorf("NanoCPUs can not be set, as your kernel does not support CPU cfs period/quota or the cgroup is not mounted")
 	}
+	// The highest precision we could get on Linux is 0.001, by setting
+	//   cpu.cfs_period_us=1000ms
+	//   cpu.cfs_quota=1ms
+	// See the following link for details:
+	// https://www.kernel.org/doc/Documentation/scheduler/sched-bwc.txt
+	// Here we don't set the lower limit and it is up to the underlying platform (e.g., Linux) to return an error.
+	// The error message is 0.01 so that this is consistent with Windows
 	if resources.NanoCPUs < 0 || resources.NanoCPUs > int64(sysinfo.NumCPU())*1e9 {
-		return warnings, fmt.Errorf("Range of Nano CPUs is from 1 to %d", int64(sysinfo.NumCPU())*1e9)
+		return warnings, fmt.Errorf("Range of CPUs is from 0.01 to %d.00, as there are only %d CPUs available", sysinfo.NumCPU(), sysinfo.NumCPU())
 	}
 
 	if resources.CPUShares > 0 && !sysInfo.CPUShares {
@@ -1222,7 +1226,7 @@ func setupOOMScoreAdj(score int) error {
 	if err != nil {
 		return err
 	}
-
+	defer f.Close()
 	stringScore := strconv.Itoa(score)
 	_, err = f.WriteString(stringScore)
 	if os.IsPermission(err) {
@@ -1234,7 +1238,7 @@ func setupOOMScoreAdj(score int) error {
 		}
 		return nil
 	}
-	f.Close()
+
 	return err
 }
 
@@ -1276,12 +1280,6 @@ func (daemon *Daemon) setupSeccompProfile() error {
 			return fmt.Errorf("opening seccomp profile (%s) failed: %v", daemon.configStore.SeccompProfile, err)
 		}
 		daemon.seccompProfile = b
-		p := struct {
-			DefaultAction string `json:"defaultAction"`
-		}{}
-		if err := json.Unmarshal(daemon.seccompProfile, &p); err != nil {
-			return err
-		}
 	}
 	return nil
 }

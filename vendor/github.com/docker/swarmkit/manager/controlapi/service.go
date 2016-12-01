@@ -14,6 +14,7 @@ import (
 	"github.com/docker/swarmkit/manager/constraint"
 	"github.com/docker/swarmkit/manager/state/store"
 	"github.com/docker/swarmkit/protobuf/ptypes"
+	"github.com/docker/swarmkit/template"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -168,7 +169,28 @@ func validateTask(taskSpec api.TaskSpec) error {
 		return grpc.Errorf(codes.Unimplemented, "RuntimeSpec: unimplemented runtime in service spec")
 	}
 
-	if err := validateContainerSpec(taskSpec.GetContainer()); err != nil {
+	// Building a empty/dummy Task to validate the templating and
+	// the resulting container spec as well. This is a *best effort*
+	// validation.
+	preparedSpec, err := template.ExpandContainerSpec(&api.Task{
+		Spec:      taskSpec,
+		ServiceID: "serviceid",
+		Slot:      1,
+		NodeID:    "nodeid",
+		Networks:  []*api.NetworkAttachment{},
+		Annotations: api.Annotations{
+			Name: "taskname",
+		},
+		ServiceAnnotations: api.Annotations{
+			Name: "servicename",
+		},
+		Endpoint:  &api.Endpoint{},
+		LogDriver: taskSpec.LogDriver,
+	})
+	if err != nil {
+		return grpc.Errorf(codes.InvalidArgument, err.Error())
+	}
+	if err := validateContainerSpec(preparedSpec); err != nil {
 		return err
 	}
 
@@ -181,10 +203,6 @@ func validateEndpointSpec(epSpec *api.EndpointSpec) error {
 		return nil
 	}
 
-	if len(epSpec.Ports) > 0 && epSpec.Mode == api.ResolutionModeDNSRoundRobin {
-		return grpc.Errorf(codes.InvalidArgument, "EndpointSpec: ports can't be used with dnsrr mode")
-	}
-
 	type portSpec struct {
 		publishedPort uint32
 		protocol      api.PortConfig_Protocol
@@ -192,6 +210,17 @@ func validateEndpointSpec(epSpec *api.EndpointSpec) error {
 
 	portSet := make(map[portSpec]struct{})
 	for _, port := range epSpec.Ports {
+		// Publish mode = "ingress" represents Routing-Mesh and current implementation
+		// of routing-mesh relies on IPVS based load-balancing with input=published-port.
+		// But Endpoint-Spec mode of DNSRR relies on multiple A records and cannot be used
+		// with routing-mesh (PublishMode="ingress") which cannot rely on DNSRR.
+		// But PublishMode="host" doesn't provide Routing-Mesh and the DNSRR is applicable
+		// for the backend network and hence we accept that configuration.
+
+		if epSpec.Mode == api.ResolutionModeDNSRoundRobin && port.PublishMode == api.PublishModeIngress {
+			return grpc.Errorf(codes.InvalidArgument, "EndpointSpec: port published with ingress mode can't be used with dnsrr mode")
+		}
+
 		// If published port is not specified, it does not conflict
 		// with any others.
 		if port.PublishedPort == 0 {

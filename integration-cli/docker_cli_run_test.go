@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"os"
@@ -375,7 +376,7 @@ func (s *DockerSuite) TestRunCreateVolumesInSymlinkDir(c *check.C) {
 		containerPath string
 		cmd           string
 	)
-	// TODO Windows (Post TP5): This test cannot run on a Windows daemon as
+	// This test cannot run on a Windows daemon as
 	// Windows does not support symlinks inside a volume path
 	testRequires(c, SameHostDaemon, DaemonIsLinux)
 	name := "test-volume-symlink"
@@ -422,7 +423,7 @@ func (s *DockerSuite) TestRunCreateVolumesInSymlinkDir2(c *check.C) {
 		containerPath string
 		cmd           string
 	)
-	// TODO Windows (Post TP5): This test cannot run on a Windows daemon as
+	// This test cannot run on a Windows daemon as
 	// Windows does not support symlinks inside a volume path
 	testRequires(c, SameHostDaemon, DaemonIsLinux)
 	name := "test-volume-symlink2"
@@ -444,20 +445,12 @@ func (s *DockerSuite) TestRunCreateVolumesInSymlinkDir2(c *check.C) {
 }
 
 func (s *DockerSuite) TestRunVolumesMountedAsReadonly(c *check.C) {
-	// TODO Windows: Temporary check - remove once TP5 support is dropped
-	if daemonPlatform == "windows" && windowsDaemonKV < 14350 {
-		c.Skip("Needs later Windows build for RO volumes")
-	}
 	if _, code, err := dockerCmdWithError("run", "-v", "/test:/test:ro", "busybox", "touch", "/test/somefile"); err == nil || code == 0 {
 		c.Fatalf("run should fail because volume is ro: exit code %d", code)
 	}
 }
 
 func (s *DockerSuite) TestRunVolumesFromInReadonlyModeFails(c *check.C) {
-	// TODO Windows: Temporary check - remove once TP5 support is dropped
-	if daemonPlatform == "windows" && windowsDaemonKV < 14350 {
-		c.Skip("Needs later Windows build for RO volumes")
-	}
 	var (
 		volumeDir string
 		fileInVol string
@@ -510,10 +503,6 @@ func (s *DockerSuite) TestVolumesFromGetsProperMode(c *check.C) {
 	}
 	defer os.RemoveAll(hostpath)
 
-	// TODO Windows: Temporary check - remove once TP5 support is dropped
-	if daemonPlatform == "windows" && windowsDaemonKV < 14350 {
-		c.Skip("Needs later Windows build for RO volumes")
-	}
 	dockerCmd(c, "run", "--name", "parent", "-v", hostpath+":"+prefix+slash+"test:ro", "busybox", "true")
 
 	// Expect this "rw" mode to be be ignored since the inherited volume is "ro"
@@ -666,7 +655,7 @@ func (s *DockerSuite) TestRunCreateVolumeWithSymlink(c *check.C) {
 
 // Tests that a volume path that has a symlink exists in a container mounting it with `--volumes-from`.
 func (s *DockerSuite) TestRunVolumesFromSymlinkPath(c *check.C) {
-	// TODO Windows (Post TP5): This test cannot run on a Windows daemon as
+	// This test cannot run on a Windows daemon as
 	// Windows does not support symlinks inside a volume path
 	testRequires(c, DaemonIsLinux)
 	name := "docker-test-volumesfromsymlinkpath"
@@ -1733,7 +1722,7 @@ func (s *DockerSuite) TestRunCopyVolumeUIDGID(c *check.C) {
 
 // Test for #1582
 func (s *DockerSuite) TestRunCopyVolumeContent(c *check.C) {
-	// TODO Windows, post TP5. Windows does not yet support volume functionality
+	// TODO Windows, post RS1. Windows does not yet support volume functionality
 	// that copies from the image to the volume.
 	testRequires(c, DaemonIsLinux)
 	name := "testruncopyvolumecontent"
@@ -1986,13 +1975,10 @@ func (s *DockerSuite) TestRunBindMounts(c *check.C) {
 	defer os.RemoveAll(tmpDir)
 	writeFile(path.Join(tmpDir, "touch-me"), "", c)
 
-	// TODO Windows: Temporary check - remove once TP5 support is dropped
-	if daemonPlatform != "windows" || windowsDaemonKV >= 14350 {
-		// Test reading from a read-only bind mount
-		out, _ := dockerCmd(c, "run", "-v", fmt.Sprintf("%s:%s/tmp:ro", tmpDir, prefix), "busybox", "ls", prefix+"/tmp")
-		if !strings.Contains(out, "touch-me") {
-			c.Fatal("Container failed to read from bind mount")
-		}
+	// Test reading from a read-only bind mount
+	out, _ := dockerCmd(c, "run", "-v", fmt.Sprintf("%s:%s/tmp:ro", tmpDir, prefix), "busybox", "ls", prefix+"/tmp")
+	if !strings.Contains(out, "touch-me") {
+		c.Fatal("Container failed to read from bind mount")
 	}
 
 	// test writing to bind mount
@@ -2179,7 +2165,7 @@ func (s *DockerSuite) TestRunAllocatePortInReservedRange(c *check.C) {
 
 // Regression test for #7792
 func (s *DockerSuite) TestRunMountOrdering(c *check.C) {
-	// TODO Windows: Post TP5. Updated, but Windows does not support nested mounts currently.
+	// TODO Windows: Post RS1. Windows does not support nested mounts.
 	testRequires(c, SameHostDaemon, DaemonIsLinux, NotUserNamespace)
 	prefix, _ := getPrefixAndSlashFromDaemonPlatform()
 
@@ -3172,10 +3158,7 @@ func (s *DockerSuite) TestVolumeFromMixedRWOptions(c *check.C) {
 
 	dockerCmd(c, "run", "--name", "parent", "-v", prefix+"/test", "busybox", "true")
 
-	// TODO Windows: Temporary check - remove once TP5 support is dropped
-	if daemonPlatform != "windows" || windowsDaemonKV >= 14350 {
-		dockerCmd(c, "run", "--volumes-from", "parent:ro", "--name", "test-volumes-1", "busybox", "true")
-	}
+	dockerCmd(c, "run", "--volumes-from", "parent:ro", "--name", "test-volumes-1", "busybox", "true")
 	dockerCmd(c, "run", "--volumes-from", "parent:rw", "--name", "test-volumes-2", "busybox", "true")
 
 	if daemonPlatform != "windows" {
@@ -4514,7 +4497,7 @@ func (s *DockerSuite) TestRunStoppedLoggingDriverNoLeak(c *check.C) {
 
 	out, _, err := dockerCmdWithError("run", "--name=fail", "--log-driver=splunk", "busybox", "true")
 	c.Assert(err, checker.NotNil)
-	c.Assert(out, checker.Contains, "Failed to initialize logging driver", check.Commentf("error should be about logging driver, got output %s", out))
+	c.Assert(out, checker.Contains, "failed to initialize logging driver", check.Commentf("error should be about logging driver, got output %s", out))
 
 	// NGoroutines is not updated right away, so we need to wait before failing
 	c.Assert(waitForGoroutines(nroutines), checker.IsNil)
@@ -4569,7 +4552,7 @@ func (s *DockerSuite) TestRunServicingContainer(c *check.C) {
 }
 
 func (s *DockerSuite) TestRunDuplicateMount(c *check.C) {
-	testRequires(c, SameHostDaemon, DaemonIsLinux)
+	testRequires(c, SameHostDaemon, DaemonIsLinux, NotUserNamespace)
 
 	tmpFile, err := ioutil.TempFile("", "touch-me")
 	c.Assert(err, checker.IsNil)
@@ -4587,184 +4570,6 @@ func (s *DockerSuite) TestRunDuplicateMount(c *check.C) {
 
 	out = inspectFieldJSON(c, name, "Config.Volumes")
 	c.Assert(out, checker.Contains, "null")
-}
-
-func (s *DockerSuite) TestRunMount(c *check.C) {
-	testRequires(c, DaemonIsLinux, SameHostDaemon, NotUserNamespace)
-
-	// mnt1, mnt2, and testCatFooBar are commonly used in multiple test cases
-	tmpDir, err := ioutil.TempDir("", "mount")
-	if err != nil {
-		c.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-	mnt1, mnt2 := path.Join(tmpDir, "mnt1"), path.Join(tmpDir, "mnt2")
-	if err := os.Mkdir(mnt1, 0755); err != nil {
-		c.Fatal(err)
-	}
-	if err := os.Mkdir(mnt2, 0755); err != nil {
-		c.Fatal(err)
-	}
-	if err := ioutil.WriteFile(path.Join(mnt1, "test1"), []byte("test1"), 0644); err != nil {
-		c.Fatal(err)
-	}
-	if err := ioutil.WriteFile(path.Join(mnt2, "test2"), []byte("test2"), 0644); err != nil {
-		c.Fatal(err)
-	}
-	testCatFooBar := func(cName string) error {
-		out, _ := dockerCmd(c, "exec", cName, "cat", "/foo/test1")
-		if out != "test1" {
-			return fmt.Errorf("%s not mounted on /foo", mnt1)
-		}
-		out, _ = dockerCmd(c, "exec", cName, "cat", "/bar/test2")
-		if out != "test2" {
-			return fmt.Errorf("%s not mounted on /bar", mnt2)
-		}
-		return nil
-	}
-
-	type testCase struct {
-		equivalents [][]string
-		valid       bool
-		// fn should be nil if valid==false
-		fn func(cName string) error
-	}
-	cases := []testCase{
-		{
-			equivalents: [][]string{
-				{
-					"--mount", fmt.Sprintf("type=bind,src=%s,dst=/foo", mnt1),
-					"--mount", fmt.Sprintf("type=bind,src=%s,dst=/bar", mnt2),
-				},
-				{
-					"--mount", fmt.Sprintf("type=bind,src=%s,dst=/foo", mnt1),
-					"--mount", fmt.Sprintf("type=bind,src=%s,target=/bar", mnt2),
-				},
-				{
-					"--volume", fmt.Sprintf("%s:/foo", mnt1),
-					"--mount", fmt.Sprintf("type=bind,src=%s,target=/bar", mnt2),
-				},
-			},
-			valid: true,
-			fn:    testCatFooBar,
-		},
-		{
-			equivalents: [][]string{
-				{
-					"--mount", fmt.Sprintf("type=volume,src=%s,dst=/foo", mnt1),
-					"--mount", fmt.Sprintf("type=volume,src=%s,dst=/bar", mnt2),
-				},
-				{
-					"--mount", fmt.Sprintf("type=volume,src=%s,dst=/foo", mnt1),
-					"--mount", fmt.Sprintf("type=volume,src=%s,target=/bar", mnt2),
-				},
-			},
-			valid: false,
-		},
-		{
-			equivalents: [][]string{
-				{
-					"--mount", fmt.Sprintf("type=bind,src=%s,dst=/foo", mnt1),
-					"--mount", fmt.Sprintf("type=volume,src=%s,dst=/bar", mnt2),
-				},
-				{
-					"--volume", fmt.Sprintf("%s:/foo", mnt1),
-					"--mount", fmt.Sprintf("type=volume,src=%s,target=/bar", mnt2),
-				},
-			},
-			valid: false,
-			fn:    testCatFooBar,
-		},
-		{
-			equivalents: [][]string{
-				{
-					"--read-only",
-					"--mount", "type=volume,dst=/bar",
-				},
-			},
-			valid: true,
-			fn: func(cName string) error {
-				_, _, err := dockerCmdWithError("exec", cName, "touch", "/bar/icanwritehere")
-				return err
-			},
-		},
-		{
-			equivalents: [][]string{
-				{
-					"--read-only",
-					"--mount", fmt.Sprintf("type=bind,src=%s,dst=/foo", mnt1),
-					"--mount", "type=volume,dst=/bar",
-				},
-				{
-					"--read-only",
-					"--volume", fmt.Sprintf("%s:/foo", mnt1),
-					"--mount", "type=volume,dst=/bar",
-				},
-			},
-			valid: true,
-			fn: func(cName string) error {
-				out, _ := dockerCmd(c, "exec", cName, "cat", "/foo/test1")
-				if out != "test1" {
-					return fmt.Errorf("%s not mounted on /foo", mnt1)
-				}
-				_, _, err := dockerCmdWithError("exec", cName, "touch", "/bar/icanwritehere")
-				return err
-			},
-		},
-		{
-			equivalents: [][]string{
-				{
-					"--mount", fmt.Sprintf("type=bind,src=%s,dst=/foo", mnt1),
-					"--mount", fmt.Sprintf("type=bind,src=%s,dst=/foo", mnt2),
-				},
-				{
-					"--mount", fmt.Sprintf("type=bind,src=%s,dst=/foo", mnt1),
-					"--mount", fmt.Sprintf("type=bind,src=%s,target=/foo", mnt2),
-				},
-				{
-					"--volume", fmt.Sprintf("%s:/foo", mnt1),
-					"--mount", fmt.Sprintf("type=bind,src=%s,target=/foo", mnt2),
-				},
-			},
-			valid: false,
-		},
-		{
-			equivalents: [][]string{
-				{
-					"--volume", fmt.Sprintf("%s:/foo", mnt1),
-					"--mount", fmt.Sprintf("type=volume,src=%s,target=/foo", mnt2),
-				},
-			},
-			valid: false,
-		},
-		{
-			equivalents: [][]string{
-				{
-					"--mount", "type=volume,target=/foo",
-					"--mount", "type=volume,target=/foo",
-				},
-			},
-			valid: false,
-		},
-	}
-
-	for i, testCase := range cases {
-		for j, opts := range testCase.equivalents {
-			cName := fmt.Sprintf("mount-%d-%d", i, j)
-			_, _, err := dockerCmdWithError(append([]string{"run", "-i", "-d", "--name", cName},
-				append(opts, []string{"busybox", "top"}...)...)...)
-			if testCase.valid {
-				c.Assert(err, check.IsNil,
-					check.Commentf("got error while creating a container with %v (%s)", opts, cName))
-				c.Assert(testCase.fn(cName), check.IsNil,
-					check.Commentf("got error while executing test for %v (%s)", opts, cName))
-				dockerCmd(c, "rm", "-f", cName)
-			} else {
-				c.Assert(err, checker.NotNil,
-					check.Commentf("got nil while creating a container with %v (%s)", opts, cName))
-			}
-		}
-	}
 }
 
 func (s *DockerSuite) TestRunWindowsWithCPUCount(c *check.C) {
@@ -4829,4 +4634,52 @@ func (s *DockerSuite) TestRunHypervIsolationWithCPUCountCPUSharesAndCPUPercent(c
 
 	out = inspectField(c, "test", "HostConfig.CPUPercent")
 	c.Assert(out, check.Equals, "80")
+}
+
+// Test for #25099
+func (s *DockerSuite) TestRunEmptyEnv(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+
+	expectedOutput := "invalid environment variable:"
+
+	out, _, err := dockerCmdWithError("run", "-e", "", "busybox", "true")
+	c.Assert(err, checker.NotNil)
+	c.Assert(out, checker.Contains, expectedOutput)
+
+	out, _, err = dockerCmdWithError("run", "-e", "=", "busybox", "true")
+	c.Assert(err, checker.NotNil)
+	c.Assert(out, checker.Contains, expectedOutput)
+
+	out, _, err = dockerCmdWithError("run", "-e", "=foo", "busybox", "true")
+	c.Assert(err, checker.NotNil)
+	c.Assert(out, checker.Contains, expectedOutput)
+}
+
+// #28658
+func (s *DockerSuite) TestSlowStdinClosing(c *check.C) {
+	name := "testslowstdinclosing"
+	repeat := 3 // regression happened 50% of the time
+	for i := 0; i < repeat; i++ {
+		cmd := exec.Command(dockerBinary, "run", "--rm", "--name", name, "-i", "busybox", "cat")
+		cmd.Stdin = &delayedReader{}
+		done := make(chan error, 1)
+		go func() {
+			_, err := runCommand(cmd)
+			done <- err
+		}()
+
+		select {
+		case <-time.After(15 * time.Second):
+			c.Fatal("running container timed out") // cleanup in teardown
+		case err := <-done:
+			c.Assert(err, checker.IsNil)
+		}
+	}
+}
+
+type delayedReader struct{}
+
+func (s *delayedReader) Read([]byte) (int, error) {
+	time.Sleep(500 * time.Millisecond)
+	return 0, io.EOF
 }

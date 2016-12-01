@@ -37,7 +37,7 @@ func getServices(
 		types.ServiceListOptions{Filters: getStackFilter(namespace)})
 }
 
-func getNetworks(
+func getStackNetworks(
 	ctx context.Context,
 	apiclient client.APIClient,
 	namespace string,
@@ -45,4 +45,12 @@ func getNetworks(
 	return apiclient.NetworkList(
 		ctx,
 		types.NetworkListOptions{Filters: getStackFilter(namespace)})
+}
+
+type namespace struct {
+	name string
+}
+
+func (n namespace) scope(name string) string {
+	return n.name + "_" + name
 }

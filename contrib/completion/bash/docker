@@ -123,7 +123,7 @@ __docker_complete_container_ids() {
 	COMPREPLY=( $(compgen -W "${containers[*]}" -- "$cur") )
 }
 
-__docker_complete_images() {
+__docker_images() {
 	local images_args=""
 
 	case "$DOCKER_COMPLETION_SHOW_IMAGE_IDS" in
@@ -152,8 +152,11 @@ __docker_complete_images() {
 			;;
 	esac
 
-	local images=$(__docker_q images $images_args | awk "$awk_script")
-	COMPREPLY=( $(compgen -W "$images" -- "$cur") )
+	__docker_q images $images_args | awk "$awk_script" | grep -v '<none>$'
+}
+
+__docker_complete_images() {
+	COMPREPLY=( $(compgen -W "$(__docker_images)" -- "$cur") )
 	__ltrim_colon_completions "$cur"
 }
 
@@ -166,13 +169,6 @@ __docker_complete_image_repos_and_tags() {
 	local reposAndTags="$(__docker_q images | awk 'NR>1 && $1 != "<none>" { print $1; print $1":"$2 }')"
 	COMPREPLY=( $(compgen -W "$reposAndTags" -- "$cur") )
 	__ltrim_colon_completions "$cur"
-}
-
-__docker_complete_containers_and_images() {
-	__docker_complete_containers_all
-	local containers=( "${COMPREPLY[@]}" )
-	__docker_complete_images
-	COMPREPLY+=( "${containers[@]}" )
 }
 
 # __docker_networks returns a list of all networks. Additional options to
@@ -237,11 +233,13 @@ __docker_complete_volumes() {
 	COMPREPLY=( $(compgen -W "$(__docker_volumes "$@")" -- "$current") )
 }
 
-# __docker_plugins returns a list of all plugins of a given type.
+# __docker_plugins_bundled returns a list of all plugins of a given type.
 # The type has to be specified with the mandatory option `--type`.
 # Valid types are: Network, Volume, Authorization.
 # Completions may be added or removed with `--add` and `--remove`
-__docker_plugins() {
+# This function only deals with plugins that come bundled with Docker.
+# For plugins managed by `docker plugin`, see `__docker_plugins_installed`.
+__docker_plugins_bundled() {
 	local type add=() remove=()
 	while true ; do
 		case "$1" in
@@ -270,16 +268,39 @@ __docker_plugins() {
 	echo "${plugins[@]} ${add[@]}"
 }
 
-# __docker_complete_plugins applies completion of plugins based on the current
+# __docker_complete_plugins_bundled applies completion of plugins based on the current
 # value of `$cur` or the value of the optional first option `--cur`, if given.
 # The plugin type has to be specified with the next option `--type`.
-__docker_complete_plugins() {
+# This function only deals with plugins that come bundled with Docker.
+# For completion of plugins managed by `docker plugin`, see
+# `__docker_complete_plugins_installed`.
+__docker_complete_plugins_bundled() {
 	local current="$cur"
 	if [ "$1" = "--cur" ] ; then
 		current="$2"
 		shift 2
 	fi
-	COMPREPLY=( $(compgen -W "$(__docker_plugins "$@")" -- "$current") )
+	COMPREPLY=( $(compgen -W "$(__docker_plugins_bundled "$@")" -- "$current") )
+}
+
+# __docker_plugins_installed returns a list of all plugins that were installed with
+# the Docker plugin API.
+# For built-in pugins, see `__docker_plugins_bundled`.
+__docker_plugins_installed() {
+	__docker_q plugin ls | awk 'NR>1 {print $1}'
+}
+
+# __docker_complete_plugins_installed applies completion of plugins that were installed
+# with the Docker plugin API, based on the current value of `$cur` or the value of
+# the optional first option `--cur`, if given.
+# For completion of built-in pugins, see `__docker_complete_plugins_bundled`.
+__docker_complete_plugins_installed() {
+	local current="$cur"
+	if [ "$1" = "--cur" ] ; then
+		current="$2"
+		shift 2
+	fi
+	COMPREPLY=( $(compgen -W "$(__docker_plugins_installed "$@")" -- "$current") )
 }
 
 __docker_runtimes() {
@@ -288,6 +309,22 @@ __docker_runtimes() {
 
 __docker_complete_runtimes() {
 	COMPREPLY=( $(compgen -W "$(__docker_runtimes)" -- "$cur") )
+}
+
+# __docker_stacks returns a list of all stacks.
+__docker_stacks() {
+	__docker_q stack ls | awk 'NR>1 {print $1}'
+}
+
+# __docker_complete_stacks applies completion of stacks based on the current value
+# of `$cur` or the value of the optional first option `--cur`, if given.
+__docker_complete_stacks() {
+	local current="$cur"
+	if [ "$1" = "--cur" ] ; then
+		current="$2"
+		shift 2
+	fi
+	COMPREPLY=( $(compgen -W "$(__docker_stacks "$@")" -- "$current") )
 }
 
 # __docker_nodes returns a list of all nodes. Additional options to
@@ -1121,7 +1158,7 @@ _docker_container_ls() {
 
 	case "$prev" in
 		--filter|-f)
-			COMPREPLY=( $( compgen -S = -W "ancestor before exited health id label name network since status volume" -- "$cur" ) )
+			COMPREPLY=( $( compgen -S = -W "ancestor before exited health id is-task label name network since status volume" -- "$cur" ) )
 			__docker_nospace
 			return
 			;;
@@ -1248,7 +1285,7 @@ _docker_container_run() {
 		--device-write-bps
 		--device-write-iops
 		--dns
-		--dns-opt
+		--dns-option
 		--dns-search
 		--entrypoint
 		--env -e
@@ -1272,7 +1309,6 @@ _docker_container_run() {
 		--memory-swap
 		--memory-swappiness
 		--memory-reservation
-		--mount
 		--name
 		--network
 		--network-alias
@@ -1439,7 +1475,7 @@ _docker_container_run() {
 					__docker_complete_containers_all --cur "${cur#*:}"
 					;;
 				*)
-					COMPREPLY=( $( compgen -W "$(__docker_plugins --type Network) $(__docker_networks) container:" -- "$cur") )
+					COMPREPLY=( $( compgen -W "$(__docker_plugins_bundled --type Network) $(__docker_networks) container:" -- "$cur") )
 					if [ "${COMPREPLY[*]}" = "container:" ] ; then
 						__docker_nospace
 					fi
@@ -1486,7 +1522,7 @@ _docker_container_run() {
 			return
 			;;
 		--volume-driver)
-			__docker_complete_plugins --type Volume
+			__docker_complete_plugins_bundled --type Volume
 			return
 			;;
 		--volumes-from)
@@ -1704,9 +1740,11 @@ _docker_daemon() {
 		--oom-score-adjust
 		--pidfile -p
 		--registry-mirror
+		--seccomp-profile
 		--shutdown-timeout
 		--storage-driver -s
 		--storage-opt
+		--userland-proxy-path
 		--userns-remap
 	"
 
@@ -1740,7 +1778,7 @@ _docker_daemon() {
 
 	case "$prev" in
 		--authorization-plugin)
-			__docker_complete_plugins --type Authorization
+			__docker_complete_plugins_bundled --type Authorization
 			return
 			;;
 		--cluster-store)
@@ -1753,7 +1791,7 @@ _docker_daemon() {
 			__docker_nospace
 			return
 			;;
-		--config-file|--containerd|--init-path|--pidfile|-p|--tlscacert|--tlscert|--tlskey)
+		--config-file|--containerd|--init-path|--pidfile|-p|--tlscacert|--tlscert|--tlskey|--userland-proxy-path)
 			_filedir
 			return
 			;;
@@ -1814,6 +1852,10 @@ _docker_daemon() {
 			;;
 		--log-opt)
 			__docker_complete_log_options
+			return
+			;;
+		--seccomp-profile)
+			_filedir json
 			return
 			;;
 		--userns-remap)
@@ -1896,6 +1938,7 @@ _docker_image() {
 _docker_image_build() {
 	local options_with_args="
 		--build-arg
+		--cache-from
 		--cgroup-parent
 		--cpuset-cpus
 		--cpuset-mems
@@ -1907,6 +1950,7 @@ _docker_image_build() {
 		--label
 		--memory -m
 		--memory-swap
+		--network
 		--shm-size
 		--tag -t
 		--ulimit
@@ -1931,12 +1975,30 @@ _docker_image_build() {
 			__docker_nospace
 			return
 			;;
+		--cache-from)
+			__docker_complete_image_repos_and_tags
+			return
+			;;
 		--file|-f)
 			_filedir
 			return
 			;;
 		--isolation)
 			__docker_complete_isolation
+			return
+			;;
+		--network)
+			case "$cur" in
+				container:*)
+					__docker_complete_containers_all --cur "${cur#*:}"
+					;;
+				*)
+					COMPREPLY=( $( compgen -W "$(__docker_plugins --type Network) $(__docker_networks) container:" -- "$cur") )
+					if [ "${COMPREPLY[*]}" = "container:" ] ; then
+						__docker_nospace
+					fi
+					;;
+			esac
 			return
 			;;
 		--tag|-t)
@@ -2031,7 +2093,7 @@ _docker_image_list() {
 _docker_image_ls() {
 	local key=$(__docker_map_key_of_current_option '--filter|-f')
 	case "$key" in
-		before)
+		before|since|reference)
 			cur="${cur##*=}"
 			__docker_complete_images
 			return
@@ -2043,16 +2105,11 @@ _docker_image_ls() {
 		label)
 			return
 			;;
-		since)
-			cur="${cur##*=}"
-			__docker_complete_images
-			return
-			;;
 	esac
 
 	case "$prev" in
 		--filter|-f)
-			COMPREPLY=( $( compgen -S = -W "before dangling label since" -- "$cur" ) )
+			COMPREPLY=( $( compgen -S = -W "before dangling label reference since" -- "$cur" ) )
 			__docker_nospace
 			return
 			;;
@@ -2207,7 +2264,7 @@ _docker_inspect() {
 			;;
 		--type)
 			if [ -z "$preselected_type" ] ; then
-				COMPREPLY=( $( compgen -W "image container" -- "$cur" ) )
+				COMPREPLY=( $( compgen -W "container image network node service volume" -- "$cur" ) )
 				return
 			fi
 			;;
@@ -2224,13 +2281,32 @@ _docker_inspect() {
 		*)
 			case "$type" in
 				'')
-					__docker_complete_containers_and_images
+					COMPREPLY=( $( compgen -W "
+						$(__docker_containers --all)
+						$(__docker_images)
+						$(__docker_networks)
+						$(__docker_nodes)
+						$(__docker_services)
+						$(__docker_volumes)
+					" -- "$cur" ) )
 					;;
 				container)
 					__docker_complete_containers_all
 					;;
 				image)
 					__docker_complete_images
+					;;
+				network)
+					__docker_complete_networks
+					;;
+				node)
+					__docker_complete_nodes
+					;;
+				service)
+					__docker_complete_services
+					;;
+				volume)
+					__docker_complete_volumes
 					;;
 			esac
 	esac
@@ -2327,7 +2403,7 @@ _docker_network_create() {
 			;;
 		--driver|-d)
 			# remove drivers that allow one instance only, add drivers missing in `docker info`
-			__docker_complete_plugins --type Network --remove host --remove null --add macvlan
+			__docker_complete_plugins_bundled --type Network --remove host --remove null --add macvlan
 			return
 			;;
 		--label)
@@ -2378,7 +2454,7 @@ _docker_network_ls() {
 	local key=$(__docker_map_key_of_current_option '--filter|-f')
 	case "$key" in
 		driver)
-			__docker_complete_plugins --cur "${cur##*=}" --type Network --add macvlan
+			__docker_complete_plugins_bundled --cur "${cur##*=}" --type Network --add macvlan
 			return
 			;;
 		id)
@@ -2600,6 +2676,7 @@ _docker_service_update() {
 		--health-interval
 		--health-retries
 		--health-timeout
+		--hostname
 		--label -l
 		--limit-cpu
 		--limit-memory
@@ -2638,17 +2715,29 @@ _docker_service_update() {
 	if [ "$subcommand" = "create" ] ; then
 		options_with_args="$options_with_args
 			--container-label
+			--dns
+			--dns-option
+			--dns-search
 			--env-file
 			--group
-			--hostname
+			--host
 			--mode
 			--name
+			--port
 		"
 
 		case "$prev" in
 			--env-file)
 				_filedir
 				return
+				;;
+			--host)
+				case "$cur" in
+					*:)
+						__docker_complete_resolved_hostname
+						return
+						;;
+				esac
 				;;
 			--mode)
 				COMPREPLY=( $( compgen -W "global replicated" -- "$cur" ) )
@@ -2665,9 +2754,19 @@ _docker_service_update() {
 			--arg
 			--container-label-add
 			--container-label-rm
+			--dns-add
+			--dns-option-add
+			--dns-option-rm
+			--dns-rm
+			--dns-search-add
+			--dns-search-rm
 			--group-add
 			--group-rm
+			--host-add
+			--host-rm
 			--image
+			--port-add
+			--port-rm
 		"
 
 		case "$prev" in
@@ -2678,6 +2777,14 @@ _docker_service_update() {
 			--group-rm)
 				COMPREPLY=( $(compgen -g -- "$cur") )
 				return
+				;;
+			--host-add|--host-rm)
+				case "$cur" in
+					*:)
+						__docker_complete_resolved_hostname
+						return
+						;;
+				esac
 				;;
 			--image)
 				__docker_complete_image_repos_and_tags
@@ -2834,21 +2941,21 @@ _docker_swarm_join-token() {
 _docker_swarm_leave() {
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--force --help" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--force -f --help" -- "$cur" ) )
 			;;
 	esac
 }
 
 _docker_swarm_update() {
 	case "$prev" in
-		--cert-expiry|--dispatcher-heartbeat|--task-history-limit)
+		--cert-expiry|--dispatcher-heartbeat|--max-snapshots|--snapshot-interval|--task-history-limit)
 			return
 			;;
 	esac
 
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--cert-expiry --dispatcher-heartbeat --help --task-history-limit" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--cert-expiry --dispatcher-heartbeat --help --max-snapshots --snapshot-interval --task-history-limit" -- "$cur" ) )
 			;;
 	esac
 }
@@ -2950,7 +3057,7 @@ _docker_node_remove() {
 _docker_node_rm() {
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--force --help" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--force -f --help" -- "$cur" ) )
 			;;
 		*)
 			__docker_complete_nodes
@@ -3015,6 +3122,160 @@ _docker_node_update() {
 _docker_pause() {
 	_docker_container_pause
 }
+
+_docker_plugin() {
+	local subcommands="
+		create
+		disable
+		enable
+		inspect
+		install
+		ls
+		push
+		rm
+		set
+	"
+	local aliases="
+		list
+		remove
+	"
+	__docker_subcommands "$subcommands $aliases" && return
+
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help" -- "$cur" ) )
+			;;
+		*)
+			COMPREPLY=( $( compgen -W "$subcommands" -- "$cur" ) )
+			;;
+	esac
+}
+
+_docker_plugin_create() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--compress --help" -- "$cur" ) )
+			;;
+		*)
+			local counter=$(__docker_pos_first_nonflag)
+			if [ $cword -eq $counter ]; then
+				# reponame
+				return
+			elif [ $cword -eq  $((counter + 1)) ]; then
+				_filedir -d
+			fi
+			;;
+	esac
+}
+
+_docker_plugin_disable() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help" -- "$cur" ) )
+			;;
+		*)
+			__docker_complete_plugins_installed
+			;;
+	esac
+}
+
+_docker_plugin_enable() {
+	case "$prev" in
+		--timeout)
+			return
+			;;
+	esac
+
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help --timeout" -- "$cur" ) )
+			;;
+		*)
+			__docker_complete_plugins_installed
+			;;
+	esac
+}
+
+_docker_plugin_inspect() {
+	case "$prev" in
+		--format|f)
+			return
+			;;
+	esac
+
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--format -f --help" -- "$cur" ) )
+			;;
+		*)
+			__docker_complete_plugins_installed
+			;;
+	esac
+}
+
+_docker_plugin_install() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--disable --grant-all-permissions--help" -- "$cur" ) )
+			;;
+	esac
+}
+
+_docker_plugin_list() {
+	_docker_plugin_ls
+}
+
+_docker_plugin_ls() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help --no-trunc" -- "$cur" ) )
+			;;
+	esac
+}
+
+_docker_plugin_push() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help" -- "$cur" ) )
+			;;
+		*)
+			local counter=$(__docker_pos_first_nonflag)
+			if [ $cword -eq $counter ]; then
+				__docker_complete_plugins_installed
+			fi
+			;;
+	esac
+}
+
+_docker_plugin_remove() {
+	_docker_plugin_rm
+}
+
+_docker_plugin_rm() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--force -f --help" -- "$cur" ) )
+			;;
+		*)
+			__docker_complete_plugins_installed
+			;;
+	esac
+}
+
+_docker_plugin_set() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help" -- "$cur" ) )
+			;;
+		*)
+			local counter=$(__docker_pos_first_nonflag)
+			if [ $cword -eq $counter ]; then
+				__docker_complete_plugins_installed
+			fi
+			;;
+	esac
+}
+
 
 _docker_port() {
 	_docker_container_port
@@ -3086,6 +3347,166 @@ _docker_search() {
 			;;
 	esac
 }
+
+
+_docker_stack() {
+	local subcommands="
+		deploy
+		ls
+		ps
+		rm
+		services
+	"
+	local aliases="
+		down
+		list
+		remove
+		up
+	"
+	__docker_subcommands "$subcommands $aliases" && return
+
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help" -- "$cur" ) )
+			;;
+		*)
+			COMPREPLY=( $( compgen -W "$subcommands" -- "$cur" ) )
+			;;
+	esac
+}
+
+_docker_stack_deploy() {
+	case "$prev" in
+		--bundle-file)
+			_filedir dab
+			return
+			;;
+		--compose-file|-c)
+			_filedir yml
+			return
+			;;
+	esac
+
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--bundle-file --compose-file -c --help --with-registry-auth" -- "$cur" ) )
+			;;
+	esac
+}
+
+_docker_stack_down() {
+	_docker_stack_rm
+}
+
+_docker_stack_list() {
+	_docker_stack_ls
+}
+
+_docker_stack_ls() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help" -- "$cur" ) )
+			;;
+	esac
+}
+
+_docker_stack_ps() {
+	local key=$(__docker_map_key_of_current_option '--filter|-f')
+	case "$key" in
+		desired-state)
+			COMPREPLY=( $( compgen -W "accepted running" -- "${cur##*=}" ) )
+			return
+			;;
+		id)
+			__docker_complete_stacks --cur "${cur##*=}" --id
+			return
+			;;
+		name)
+			__docker_complete_stacks --cur "${cur##*=}" --name
+			return
+			;;
+	esac
+
+	case "$prev" in
+		--filter|-f)
+			COMPREPLY=( $( compgen -S = -W "id name desired-state" -- "$cur" ) )
+			__docker_nospace
+			return
+			;;
+	esac
+
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--all -a --filter -f --help --no-resolve --no-trunc" -- "$cur" ) )
+			;;
+		*)
+			local counter=$(__docker_pos_first_nonflag '--filter|-f')
+			if [ $cword -eq $counter ]; then
+				__docker_complete_stacks
+			fi
+			;;
+	esac
+}
+
+_docker_stack_remove() {
+	_docker_stack_rm
+}
+
+_docker_stack_rm() {
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--help" -- "$cur" ) )
+			;;
+		*)
+			local counter=$(__docker_pos_first_nonflag)
+			if [ $cword -eq $counter ]; then
+				__docker_complete_stacks
+			fi
+			;;
+	esac
+}
+
+_docker_stack_services() {
+	local key=$(__docker_map_key_of_current_option '--filter|-f')
+	case "$key" in
+		id)
+			__docker_complete_services --cur "${cur##*=}" --id
+			return
+			;;
+		label)
+			return
+			;;
+		name)
+			__docker_complete_services --cur "${cur##*=}" --name
+			return
+			;;
+	esac
+
+	case "$prev" in
+		--filter|-f)
+			COMPREPLY=( $( compgen -S = -W "id label name" -- "$cur" ) )
+			__docker_nospace
+			return
+			;;
+	esac
+
+	case "$cur" in
+		-*)
+			COMPREPLY=( $( compgen -W "--filter -f --help --quiet -q" -- "$cur" ) )
+			;;
+		*)
+			local counter=$(__docker_pos_first_nonflag '--filter|-f')
+			if [ $cword -eq $counter ]; then
+				__docker_complete_stacks
+			fi
+			;;
+	esac
+}
+
+_docker_stack_up() {
+	_docker_stack_deploy
+}
+
 
 _docker_start() {
 	_docker_container_start
@@ -3267,7 +3688,7 @@ _docker_version() {
 _docker_volume_create() {
 	case "$prev" in
 		--driver|-d)
-			__docker_complete_plugins --type Volume
+			__docker_complete_plugins_bundled --type Volume
 			return
 			;;
 		--label|--opt|-o)
@@ -3307,7 +3728,7 @@ _docker_volume_ls() {
 			return
 			;;
 		driver)
-			__docker_complete_plugins --cur "${cur##*=}" --type Volume
+			__docker_complete_plugins_bundled --cur "${cur##*=}" --type Volume
 			return
 			;;
 		name)
@@ -3407,6 +3828,7 @@ _docker() {
 		network
 		node
 		pause
+		plugin
 		port
 		ps
 		pull
@@ -3419,6 +3841,7 @@ _docker() {
 		save
 		search
 		service
+		stack
 		start
 		stats
 		stop

@@ -1,5 +1,6 @@
 ---
-aliases: "/engine/extend/plugins/"
+redirect_from:
+- "/engine/extend/plugins/"
 title: "Use Docker Engine plugins"
 description: "How to add additional functionality to Docker with plugins extensions"
 keywords: "Examples, Usage, plugins, docker, documentation, user guide"
@@ -17,8 +18,8 @@ keywords: "Examples, Usage, plugins, docker, documentation, user guide"
 # Use Docker Engine plugins
 
 This document describes the Docker Engine plugins generally available in Docker
-Engine. To view information on plugins managed by Docker Engine currently in
-experimental status, refer to [Docker Engine plugin system](index.md).
+Engine. To view information on plugins managed by Docker,
+refer to [Docker Engine plugin system](index.md).
 
 You can extend the capabilities of the Docker Engine by loading third-party
 plugins. This page explains the types of plugins and provides links to several

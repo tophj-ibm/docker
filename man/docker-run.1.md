@@ -32,7 +32,7 @@ docker-run - Run a command in a new container
 [**--device-write-bps**[=*[]*]]
 [**--device-write-iops**[=*[]*]]
 [**--dns**[=*[]*]]
-[**--dns-opt**[=*[]*]]
+[**--dns-option**[=*[]*]]
 [**--dns-search**[=*[]*]]
 [**-e**|**--env**[=*[]*]]
 [**--entrypoint**[=*ENTRYPOINT*]]
@@ -58,7 +58,6 @@ docker-run - Run a command in a new container
 [**--memory-reservation**[=*MEMORY-RESERVATION*]]
 [**--memory-swap**[=*LIMIT*]]
 [**--memory-swappiness**[=*MEMORY-SWAPPINESS*]]
-[**--mount**[=*MOUNT*]]
 [**--name**[=*NAME*]]
 [**--network-alias**[=*[]*]]
 [**--network**[=*"bridge"*]]
@@ -260,7 +259,7 @@ See **config-json(5)** for documentation on using a configuration file.
 **--dns-search**=[]
    Set custom DNS search domains (Use --dns-search=. if you don't wish to set the search domain)
 
-**--dns-opt**=[]
+**--dns-option**=[]
    Set custom DNS options
 
 **--dns**=[]
@@ -907,7 +906,7 @@ should fix the problem.
 ## Mapping Ports for External Usage
 
 The exposed port of an application can be mapped to a host port using the **-p**
-flag. For example, a httpd port 80 can be mapped to the host port 8080 using the
+flag. For example, an httpd port 80 can be mapped to the host port 8080 using the
 following:
 
     # docker run -p 8080:80 -d -i -t fedora/httpd
@@ -989,7 +988,7 @@ You would have to write policy defining a `svirt_apache_t` type.
 If you want to set `/dev/sda` device weight to `200`, you can specify the device
 weight by `--blkio-weight-device` flag. Use the following command:
 
-   # docker run -it --blkio-weight-device "/dev/sda:200" ubuntu
+    # docker run -it --blkio-weight-device "/dev/sda:200" ubuntu
 
 ## Specify isolation technology for container (--isolation)
 
