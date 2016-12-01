@@ -101,11 +101,9 @@ RUN cd /usr/local \
         && mv /usr/local/go $TEMPDIR \
         && GOROOT_BOOTSTRAP=$TEMPDIR/go \
         && cd /usr/local \
-
         && git clone --no-checkout https://go.googlesource.com/go \
         && cd go && git checkout master && cd src \
         && ./make.bash 2>&1
-
 
 
 ENV PATH /usr/local/go/bin/:$PATH
