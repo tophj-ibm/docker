@@ -39,7 +39,7 @@ func (s *DockerSuite) TestCommitWithoutPause(c *check.C) {
 //test commit a paused container should not unpause it after commit
 func (s *DockerSuite) TestCommitPausedContainer(c *check.C) {
 	testRequires(c, DaemonIsLinux)
-	defer unpauseAllContainers()
+	defer unpauseAllContainers(c)
 	out, _ := dockerCmd(c, "run", "-i", "-d", "busybox")
 
 	cleanedContainerID := strings.TrimSpace(out)
@@ -141,4 +141,17 @@ func (s *DockerSuite) TestCommitChange(c *check.C) {
 			c.Errorf("%s('%s'), expected %s", conf, res, value)
 		}
 	}
+}
+
+func (s *DockerSuite) TestCommitChangeLabels(c *check.C) {
+	dockerCmd(c, "run", "--name", "test", "--label", "some=label", "busybox", "true")
+
+	imageID, _ := dockerCmd(c, "commit",
+		"--change", "LABEL some=label2",
+		"test", "test-commit")
+	imageID = strings.TrimSpace(imageID)
+
+	c.Assert(inspectField(c, imageID, "Config.Labels"), checker.Equals, "map[some:label2]")
+	// check that container labels didn't change
+	c.Assert(inspectField(c, "test", "Config.Labels"), checker.Equals, "map[some:label]")
 }

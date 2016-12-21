@@ -31,9 +31,9 @@ Options:
       --env-file list                    Read in a file of environment variables (default [])
       --group list                       Set one or more supplementary user groups for the container (default [])
       --health-cmd string                Command to run to check health
-      --health-interval duration         Time between running the check (ns|us|ms|s|m|h) (default none)
+      --health-interval duration         Time between running the check (ns|us|ms|s|m|h)
       --health-retries int               Consecutive failures needed to report unhealthy
-      --health-timeout duration          Maximum time to allow one check to run (ns|us|ms|s|m|h) (default none)
+      --health-timeout duration          Maximum time to allow one check to run (ns|us|ms|s|m|h)
       --help                             Print usage
       --host list                        Set one or more custom host-to-IP mappings (host:ip) (default [])
       --hostname string                  Container hostname
@@ -47,16 +47,16 @@ Options:
       --name string                      Service name
       --network list                     Network attachments (default [])
       --no-healthcheck                   Disable any container-specified HEALTHCHECK
-  -p, --publish list                     Publish a port as a node port (default [])
-      --replicas uint                    Number of tasks (default none)
+  -p, --publish port                     Publish a port as a node port
+      --replicas uint                    Number of tasks
       --reserve-cpu decimal              Reserve CPUs (default 0.000)
       --reserve-memory bytes             Reserve Memory (default 0 B)
       --restart-condition string         Restart when condition is met (none, on-failure, or any)
-      --restart-delay duration           Delay between restart attempts (ns|us|ms|s|m|h) (default none)
-      --restart-max-attempts uint        Maximum number of restarts before giving up (default none)
-      --restart-window duration          Window used to evaluate the restart policy (ns|us|ms|s|m|h) (default none)
-      --secret value                     Specify secrets to expose to the service (default [])
-      --stop-grace-period duration       Time to wait before force killing a container (ns|us|ms|s|m|h) (default none)
+      --restart-delay duration           Delay between restart attempts (ns|us|ms|s|m|h)
+      --restart-max-attempts uint        Maximum number of restarts before giving up
+      --restart-window duration          Window used to evaluate the restart policy (ns|us|ms|s|m|h)
+      --secret secret                    Specify secrets to expose to the service
+      --stop-grace-period duration       Time to wait before force killing a container (ns|us|ms|s|m|h)
   -t, --tty                              Allocate a pseudo-TTY
       --update-delay duration            Delay between updates (ns|us|ms|s|m|h) (default 0s)
       --update-failure-action string     Action on update failure (pause|continue) (default "pause")
@@ -474,7 +474,7 @@ accessible at the target port on every node regardless if there is a task for
 the service running on the node. For more information refer to
 [Use swarm mode routing mesh](https://docs.docker.com/engine/swarm/ingress/).
 
-### Publish a port for TCP only or UCP only
+### Publish a port for TCP only or UDP only
 
 By default, when you publish a port, it is a TCP port. You can
 specifically publish a UDP port instead of or in addition to a TCP port. When
@@ -534,9 +534,11 @@ service's name and the node's ID where it sits.
 ```bash
 $ docker service create --name hosttempl --hostname={% raw %}"{{.Node.ID}}-{{.Service.Name}}"{% endraw %} busybox top
 va8ew30grofhjoychbr6iot8c
+
 $ docker service ps va8ew30grofhjoychbr6iot8c
-NAME                      IMAGE                                                                                   NODE          DESIRED STATE  CURRENT STATE               ERROR  PORTS
-hosttempl.1.wo41w8hg8qan  busybox:latest@sha256:29f5d56d12684887bdfa50dcd29fc31eea4aaf4ad3bec43daf19026a7ce69912  2e7a8a9c4da2  Running        Running about a minute ago
+ID            NAME         IMAGE                                                                                   NODE          DESIRED STATE  CURRENT STATE               ERROR  PORTS
+wo41w8hg8qan  hosttempl.1  busybox:latest@sha256:29f5d56d12684887bdfa50dcd29fc31eea4aaf4ad3bec43daf19026a7ce69912  2e7a8a9c4da2  Running        Running about a minute ago
+
 $ docker inspect --format={% raw %}"{{.Config.Hostname}}"{% endraw %} hosttempl.1.wo41w8hg8qanxwjwsg4kxpprj
 x3ti0erg11rjpg64m75kej2mz-hosttempl
 ```
@@ -544,6 +546,7 @@ x3ti0erg11rjpg64m75kej2mz-hosttempl
 ## Related information
 
 * [service inspect](service_inspect.md)
+* [service logs](service_logs.md)
 * [service ls](service_ls.md)
 * [service rm](service_rm.md)
 * [service scale](service_scale.md)

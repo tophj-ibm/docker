@@ -63,15 +63,15 @@ Only the operator (the person executing `docker run`) can set the
 following options.
 
  - [Detached vs foreground](#detached-vs-foreground)
-     - [Detached (-d)](#detached-d)
+     - [Detached (-d)](#detached--d)
      - [Foreground](#foreground)
  - [Container identification](#container-identification)
-     - [Name (--name)](#name-name)
+     - [Name (--name)](#name---name)
      - [PID equivalent](#pid-equivalent)
- - [IPC settings (--ipc)](#ipc-settings-ipc)
+ - [IPC settings (--ipc)](#ipc-settings---ipc)
  - [Network settings](#network-settings)
- - [Restart policies (--restart)](#restart-policies-restart)
- - [Clean up (--rm)](#clean-up-rm)
+ - [Restart policies (--restart)](#restart-policies---restart)
+ - [Clean up (--rm)](#clean-up---rm)
  - [Runtime constraints on resources](#runtime-constraints-on-resources)
  - [Runtime privilege and Linux capabilities](#runtime-privilege-and-linux-capabilities)
 
@@ -836,7 +836,7 @@ The container has unlimited memory which can cause the host to run out memory
 and require killing system processes to free memory. The `--oom-score-adj`
 parameter can be changed to select the priority of which containers will
 be killed when the system is out of memory, with negative scores making them
-less likely to be killed an positive more likely.
+less likely to be killed, and positive scores more likely.
 
 ### Kernel memory constraints
 

@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,12 +23,14 @@ import (
 
 	"github.com/docker/docker/api/types"
 	volumetypes "github.com/docker/docker/api/types/volume"
+	"github.com/docker/docker/integration-cli/daemon"
 	"github.com/docker/docker/opts"
 	"github.com/docker/docker/pkg/httputils"
+	"github.com/docker/docker/pkg/integration"
+	"github.com/docker/docker/pkg/integration/checker"
 	icmd "github.com/docker/docker/pkg/integration/cmd"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/stringutils"
-	"github.com/docker/go-connections/tlsconfig"
 	"github.com/docker/go-units"
 	"github.com/go-check/check"
 )
@@ -79,7 +80,7 @@ func init() {
 		containerStoragePath = strings.Replace(containerStoragePath, `/`, `\`, -1)
 		// On Windows, extract out the version as we need to make selective
 		// decisions during integration testing as and when features are implemented.
-		// eg in "10.0 10550 (10550.1000.amd64fre.branch.date-time)" we want 10550
+		// e.g. in "10.0 10550 (10550.1000.amd64fre.branch.date-time)" we want 10550
 		windowsDaemonKV, _ = strconv.Atoi(strings.Split(info.KernelVersion, " ")[1])
 	} else {
 		volumesConfigPath = strings.Replace(volumesConfigPath, `\`, `/`, -1)
@@ -106,55 +107,12 @@ func daemonHost() string {
 	return daemonURLStr
 }
 
-func getTLSConfig() (*tls.Config, error) {
-	dockerCertPath := os.Getenv("DOCKER_CERT_PATH")
-
-	if dockerCertPath == "" {
-		return nil, fmt.Errorf("DOCKER_TLS_VERIFY specified, but no DOCKER_CERT_PATH environment variable")
+// FIXME(vdemeester) should probably completely move to daemon struct/methods
+func sockConn(timeout time.Duration, daemonStr string) (net.Conn, error) {
+	if daemonStr == "" {
+		daemonStr = daemonHost()
 	}
-
-	option := &tlsconfig.Options{
-		CAFile:   filepath.Join(dockerCertPath, "ca.pem"),
-		CertFile: filepath.Join(dockerCertPath, "cert.pem"),
-		KeyFile:  filepath.Join(dockerCertPath, "key.pem"),
-	}
-	tlsConfig, err := tlsconfig.Client(*option)
-	if err != nil {
-		return nil, err
-	}
-
-	return tlsConfig, nil
-}
-
-func sockConn(timeout time.Duration, daemon string) (net.Conn, error) {
-	if daemon == "" {
-		daemon = daemonHost()
-	}
-	daemonURL, err := url.Parse(daemon)
-	if err != nil {
-		return nil, fmt.Errorf("could not parse url %q: %v", daemon, err)
-	}
-
-	var c net.Conn
-	switch daemonURL.Scheme {
-	case "npipe":
-		return npipeDial(daemonURL.Path, timeout)
-	case "unix":
-		return net.DialTimeout(daemonURL.Scheme, daemonURL.Path, timeout)
-	case "tcp":
-		if os.Getenv("DOCKER_TLS_VERIFY") != "" {
-			// Setup the socket TLS configuration.
-			tlsConfig, err := getTLSConfig()
-			if err != nil {
-				return nil, err
-			}
-			dialer := &net.Dialer{Timeout: timeout}
-			return tls.DialWithDialer(dialer, daemonURL.Scheme, daemonURL.Host, tlsConfig)
-		}
-		return net.DialTimeout(daemonURL.Scheme, daemonURL.Host, timeout)
-	default:
-		return c, fmt.Errorf("unknown scheme %v (%s)", daemonURL.Scheme, daemon)
-	}
+	return daemon.SockConn(timeout, daemonStr)
 }
 
 func sockRequest(method, endpoint string, data interface{}) (int, []byte, error) {
@@ -167,7 +125,7 @@ func sockRequest(method, endpoint string, data interface{}) (int, []byte, error)
 	if err != nil {
 		return -1, nil, err
 	}
-	b, err := readBody(body)
+	b, err := integration.ReadBody(body)
 	return res.StatusCode, b, err
 }
 
@@ -225,11 +183,6 @@ func newRequestClient(method, endpoint string, data io.Reader, ct, daemon string
 	return req, client, nil
 }
 
-func readBody(b io.ReadCloser) ([]byte, error) {
-	defer b.Close()
-	return ioutil.ReadAll(b)
-}
-
 func deleteContainer(container ...string) error {
 	result := icmd.RunCommand(dockerBinary, append([]string{"rm", "-fv"}, container...)...)
 	return result.Compare(icmd.Success)
@@ -245,29 +198,20 @@ func getAllContainers() (string, error) {
 	return out, err
 }
 
-func deleteAllContainers() error {
+func deleteAllContainers(c *check.C) {
 	containers, err := getAllContainers()
-	if err != nil {
-		fmt.Println(containers)
-		return err
-	}
-	if containers == "" {
-		return nil
-	}
+	c.Assert(err, checker.IsNil, check.Commentf("containers: %v", containers))
 
-	err = deleteContainer(strings.Split(strings.TrimSpace(containers), "\n")...)
-	if err != nil {
-		fmt.Println(err.Error())
+	if containers != "" {
+		err = deleteContainer(strings.Split(strings.TrimSpace(containers), "\n")...)
+		c.Assert(err, checker.IsNil)
 	}
-	return err
 }
 
-func deleteAllNetworks() error {
+func deleteAllNetworks(c *check.C) {
 	networks, err := getAllNetworks()
-	if err != nil {
-		return err
-	}
-	var errors []string
+	c.Assert(err, check.IsNil)
+	var errs []string
 	for _, n := range networks {
 		if n.Name == "bridge" || n.Name == "none" || n.Name == "host" {
 			continue
@@ -278,17 +222,14 @@ func deleteAllNetworks() error {
 		}
 		status, b, err := sockRequest("DELETE", "/networks/"+n.Name, nil)
 		if err != nil {
-			errors = append(errors, err.Error())
+			errs = append(errs, err.Error())
 			continue
 		}
 		if status != http.StatusNoContent {
-			errors = append(errors, fmt.Sprintf("error deleting network %s: %s", n.Name, string(b)))
+			errs = append(errs, fmt.Sprintf("error deleting network %s: %s", n.Name, string(b)))
 		}
 	}
-	if len(errors) > 0 {
-		return fmt.Errorf(strings.Join(errors, "\n"))
-	}
-	return nil
+	c.Assert(errs, checker.HasLen, 0, check.Commentf(strings.Join(errs, "\n")))
 }
 
 func getAllNetworks() ([]types.NetworkResource, error) {
@@ -303,26 +244,26 @@ func getAllNetworks() ([]types.NetworkResource, error) {
 	return networks, nil
 }
 
-func deleteAllPlugins() error {
+func deleteAllPlugins(c *check.C) {
 	plugins, err := getAllPlugins()
-	if err != nil {
-		return err
-	}
-	var errors []string
+	c.Assert(err, checker.IsNil)
+	var errs []string
 	for _, p := range plugins {
-		status, b, err := sockRequest("DELETE", "/plugins/"+p.Name+":"+p.Tag+"?force=1", nil)
+		pluginName := p.Name
+		tag := p.Tag
+		if tag == "" {
+			tag = "latest"
+		}
+		status, b, err := sockRequest("DELETE", "/plugins/"+pluginName+":"+tag+"?force=1", nil)
 		if err != nil {
-			errors = append(errors, err.Error())
+			errs = append(errs, err.Error())
 			continue
 		}
-		if status != http.StatusNoContent {
-			errors = append(errors, fmt.Sprintf("error deleting plugin %s: %s", p.Name, string(b)))
+		if status != http.StatusOK {
+			errs = append(errs, fmt.Sprintf("error deleting plugin %s: %s", p.Name, string(b)))
 		}
 	}
-	if len(errors) > 0 {
-		return fmt.Errorf(strings.Join(errors, "\n"))
-	}
-	return nil
+	c.Assert(errs, checker.HasLen, 0, check.Commentf(strings.Join(errs, "\n")))
 }
 
 func getAllPlugins() (types.PluginsListResponse, error) {
@@ -337,26 +278,21 @@ func getAllPlugins() (types.PluginsListResponse, error) {
 	return plugins, nil
 }
 
-func deleteAllVolumes() error {
+func deleteAllVolumes(c *check.C) {
 	volumes, err := getAllVolumes()
-	if err != nil {
-		return err
-	}
-	var errors []string
+	c.Assert(err, checker.IsNil)
+	var errs []string
 	for _, v := range volumes {
 		status, b, err := sockRequest("DELETE", "/volumes/"+v.Name, nil)
 		if err != nil {
-			errors = append(errors, err.Error())
+			errs = append(errs, err.Error())
 			continue
 		}
 		if status != http.StatusNoContent {
-			errors = append(errors, fmt.Sprintf("error deleting volume %s: %s", v.Name, string(b)))
+			errs = append(errs, fmt.Sprintf("error deleting volume %s: %s", v.Name, string(b)))
 		}
 	}
-	if len(errors) > 0 {
-		return fmt.Errorf(strings.Join(errors, "\n"))
-	}
-	return nil
+	c.Assert(errs, checker.HasLen, 0, check.Commentf(strings.Join(errs, "\n")))
 }
 
 func getAllVolumes() ([]*types.Volume, error) {
@@ -373,15 +309,13 @@ func getAllVolumes() ([]*types.Volume, error) {
 
 var protectedImages = map[string]struct{}{}
 
-func deleteAllImages() error {
-	cmd := exec.Command(dockerBinary, "images")
+func deleteAllImages(c *check.C) {
+	cmd := exec.Command(dockerBinary, "images", "--digests")
 	cmd.Env = appendBaseEnv(true)
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return err
-	}
+	c.Assert(err, checker.IsNil)
 	lines := strings.Split(string(out), "\n")[1:]
-	var imgs []string
+	imgMap := map[string]struct{}{}
 	for _, l := range lines {
 		if l == "" {
 			continue
@@ -389,21 +323,25 @@ func deleteAllImages() error {
 		fields := strings.Fields(l)
 		imgTag := fields[0] + ":" + fields[1]
 		if _, ok := protectedImages[imgTag]; !ok {
-			if fields[0] == "<none>" {
-				imgs = append(imgs, fields[2])
-				continue
+			if fields[0] == "<none>" || fields[1] == "<none>" {
+				if fields[2] != "<none>" {
+					imgMap[fields[0]+"@"+fields[2]] = struct{}{}
+				} else {
+					imgMap[fields[3]] = struct{}{}
+				}
+				// continue
+			} else {
+				imgMap[imgTag] = struct{}{}
 			}
-			imgs = append(imgs, imgTag)
 		}
 	}
-	if len(imgs) == 0 {
-		return nil
+	if len(imgMap) != 0 {
+		imgs := make([]string, 0, len(imgMap))
+		for k := range imgMap {
+			imgs = append(imgs, k)
+		}
+		dockerCmd(c, append([]string{"rmi", "-f"}, imgs...)...)
 	}
-	args := append([]string{"rmi", "-f"}, imgs...)
-	if err := exec.Command(dockerBinary, args...).Run(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func getPausedContainers() (string, error) {
@@ -428,28 +366,21 @@ func getSliceOfPausedContainers() ([]string, error) {
 	return []string{out}, err
 }
 
-func unpauseContainer(container string) error {
-	return icmd.RunCommand(dockerBinary, "unpause", container).Error
+func unpauseContainer(c *check.C, container string) {
+	dockerCmd(c, "unpause", container)
 }
 
-func unpauseAllContainers() error {
+func unpauseAllContainers(c *check.C) {
 	containers, err := getPausedContainers()
-	if err != nil {
-		fmt.Println(containers)
-		return err
-	}
+	c.Assert(err, checker.IsNil, check.Commentf("containers: %v", containers))
 
 	containers = strings.Replace(containers, "\n", " ", -1)
 	containers = strings.Trim(containers, " ")
 	containerList := strings.Split(containers, " ")
 
 	for _, value := range containerList {
-		if err = unpauseContainer(value); err != nil {
-			return err
-		}
+		unpauseContainer(c, value)
 	}
-
-	return nil
 }
 
 func deleteImages(images ...string) error {
@@ -490,10 +421,7 @@ func dockerCmdWithStdoutStderr(c *check.C, args ...string) (string, string, int)
 	}
 
 	result := icmd.RunCommand(dockerBinary, args...)
-	// TODO: why is c ever nil?
-	if c != nil {
-		c.Assert(result, icmd.Matches, icmd.Success)
-	}
+	c.Assert(result, icmd.Matches, icmd.Success)
 	return result.Stdout(), result.Stderr(), result.ExitCode
 }
 
@@ -974,23 +902,7 @@ func getContainerState(c *check.C, id string) (int, bool, error) {
 }
 
 func buildImageCmd(name, dockerfile string, useCache bool, buildFlags ...string) *exec.Cmd {
-	return buildImageCmdWithHost(name, dockerfile, "", useCache, buildFlags...)
-}
-
-func buildImageCmdWithHost(name, dockerfile, host string, useCache bool, buildFlags ...string) *exec.Cmd {
-	args := []string{}
-	if host != "" {
-		args = append(args, "--host", host)
-	}
-	args = append(args, "build", "-t", name)
-	if !useCache {
-		args = append(args, "--no-cache")
-	}
-	args = append(args, buildFlags...)
-	args = append(args, "-")
-	buildCmd := exec.Command(dockerBinary, args...)
-	buildCmd.Stdin = strings.NewReader(dockerfile)
-	return buildCmd
+	return daemon.BuildImageCmdWithHost(dockerBinary, name, dockerfile, "", useCache, buildFlags...)
 }
 
 func buildImageWithOut(name, dockerfile string, useCache bool, buildFlags ...string) (string, string, error) {
@@ -1425,39 +1337,7 @@ func waitInspect(name, expr, expected string, timeout time.Duration) error {
 }
 
 func waitInspectWithArgs(name, expr, expected string, timeout time.Duration, arg ...string) error {
-	after := time.After(timeout)
-
-	args := append(arg, "inspect", "-f", expr, name)
-	for {
-		result := icmd.RunCommand(dockerBinary, args...)
-		if result.Error != nil {
-			if !strings.Contains(result.Stderr(), "No such") {
-				return fmt.Errorf("error executing docker inspect: %v\n%s",
-					result.Stderr(), result.Stdout())
-			}
-			select {
-			case <-after:
-				return result.Error
-			default:
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
-		}
-
-		out := strings.TrimSpace(result.Stdout())
-		if out == expected {
-			break
-		}
-
-		select {
-		case <-after:
-			return fmt.Errorf("condition \"%q == %q\" not true in time", out, expected)
-		default:
-		}
-
-		time.Sleep(100 * time.Millisecond)
-	}
-	return nil
+	return daemon.WaitInspectWithArgs(dockerBinary, name, expr, expected, timeout, arg...)
 }
 
 func getInspectBody(c *check.C, version, id string) []byte {

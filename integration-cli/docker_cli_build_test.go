@@ -3610,8 +3610,8 @@ RUN [ "$(id -u):$(id -g)/$(id -un):$(id -gn)/$(id -G):$(id -Gn)" = '1001:1001/do
 
 # Switch back to root and double check that worked exactly as we might expect it to
 USER root
-# Add a "supplementary" group for our dockerio user
 RUN [ "$(id -u):$(id -g)/$(id -un):$(id -gn)/$(id -G):$(id -Gn)" = '0:0/root:root/0 10:root wheel' ] && \
+        # Add a "supplementary" group for our dockerio user
 	echo 'supplementary:x:1002:dockerio' >> /etc/group
 
 # ... and then go verify that we get it like we expect
@@ -6070,6 +6070,71 @@ func (s *DockerSuite) TestBuildBuildTimeArgUnconsumedArg(c *check.C) {
 
 }
 
+func (s *DockerSuite) TestBuildBuildTimeArgEnv(c *check.C) {
+	testRequires(c, DaemonIsLinux) // Windows does not support ARG
+	args := []string{
+		"build",
+		"--build-arg", fmt.Sprintf("FOO1=fromcmd"),
+		"--build-arg", fmt.Sprintf("FOO2="),
+		"--build-arg", fmt.Sprintf("FOO3"), // set in env
+		"--build-arg", fmt.Sprintf("FOO4"), // not set in env
+		"--build-arg", fmt.Sprintf("FOO5=fromcmd"),
+		// FOO6 is not set at all
+		"--build-arg", fmt.Sprintf("FOO7=fromcmd"), // should produce a warning
+		"--build-arg", fmt.Sprintf("FOO8="), // should produce a warning
+		"--build-arg", fmt.Sprintf("FOO9"), // should produce a warning
+		".",
+	}
+
+	dockerfile := fmt.Sprintf(`FROM busybox
+		ARG FOO1=fromfile
+		ARG FOO2=fromfile
+		ARG FOO3=fromfile
+		ARG FOO4=fromfile
+		ARG FOO5
+		ARG FOO6
+		RUN env
+		RUN [ "$FOO1" == "fromcmd" ]
+		RUN [ "$FOO2" == "" ]
+		RUN [ "$FOO3" == "fromenv" ]
+		RUN [ "$FOO4" == "fromfile" ]
+		RUN [ "$FOO5" == "fromcmd" ]
+		# The following should not exist at all in the env
+		RUN [ "$(env | grep FOO6)" == "" ]
+		RUN [ "$(env | grep FOO7)" == "" ]
+		RUN [ "$(env | grep FOO8)" == "" ]
+		RUN [ "$(env | grep FOO9)" == "" ]
+	    `)
+
+	ctx, err := fakeContext(dockerfile, nil)
+	c.Assert(err, check.IsNil)
+	defer ctx.Close()
+
+	cmd := exec.Command(dockerBinary, args...)
+	cmd.Dir = ctx.Dir
+	cmd.Env = append(os.Environ(),
+		"FOO1=fromenv",
+		"FOO2=fromenv",
+		"FOO3=fromenv")
+	out, _, err := runCommandWithOutput(cmd)
+	if err != nil {
+		c.Fatal(err, out)
+	}
+
+	// Now check to make sure we got a warning msg about unused build-args
+	i := strings.Index(out, "[Warning]")
+	if i < 0 {
+		c.Fatalf("Missing the build-arg warning in %q", out)
+	}
+
+	out = out[i:] // "out" should contain just the warning message now
+
+	// These were specified on a --build-arg but no ARG was in the Dockerfile
+	c.Assert(out, checker.Contains, "FOO7")
+	c.Assert(out, checker.Contains, "FOO8")
+	c.Assert(out, checker.Contains, "FOO9")
+}
+
 func (s *DockerSuite) TestBuildBuildTimeArgQuotedValVariants(c *check.C) {
 	imgName := "bldargtest"
 	envKey := "foo"
@@ -7139,41 +7204,6 @@ func (s *DockerSuite) TestBuildNetContainer(c *check.C) {
 
 	host, _ := dockerCmd(c, "run", "testbuildnetcontainer", "cat", "/otherhost")
 	c.Assert(strings.TrimSpace(host), check.Equals, "foobar")
-}
-
-// Test case for #24693
-func (s *DockerSuite) TestBuildRunEmptyLineAfterEscape(c *check.C) {
-	name := "testbuildemptylineafterescape"
-	_, out, err := buildImageWithOut(name,
-		`
-FROM busybox
-RUN echo x \
-
-RUN echo y
-RUN echo z
-# Comment requires the '#' to start from position 1
-# RUN echo w
-`, true)
-	c.Assert(err, checker.IsNil)
-	c.Assert(out, checker.Contains, "Step 1/4 : FROM busybox")
-	c.Assert(out, checker.Contains, "Step 2/4 : RUN echo x")
-	c.Assert(out, checker.Contains, "Step 3/4 : RUN echo y")
-	c.Assert(out, checker.Contains, "Step 4/4 : RUN echo z")
-
-	// With comment, see #24693
-	name = "testbuildcommentandemptylineafterescape"
-	_, out, err = buildImageWithOut(name,
-		`
-FROM busybox
-RUN echo grafana && \
-    echo raintank \
-#echo env-load
-RUN echo vegeta
-`, true)
-	c.Assert(err, checker.IsNil)
-	c.Assert(out, checker.Contains, "Step 1/3 : FROM busybox")
-	c.Assert(out, checker.Contains, "Step 2/3 : RUN echo grafana &&     echo raintank")
-	c.Assert(out, checker.Contains, "Step 3/3 : RUN echo vegeta")
 }
 
 func (s *DockerSuite) TestBuildSquashParent(c *check.C) {

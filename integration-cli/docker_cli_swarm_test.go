@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/swarm"
+	"github.com/docker/docker/integration-cli/daemon"
 	"github.com/docker/docker/pkg/integration/checker"
 	"github.com/docker/libnetwork/driverapi"
 	"github.com/docker/libnetwork/ipamapi"
@@ -27,7 +28,7 @@ func (s *DockerSwarmSuite) TestSwarmUpdate(c *check.C) {
 	d := s.AddDaemon(c, true, true)
 
 	getSpec := func() swarm.Spec {
-		sw := d.getSwarm(c)
+		sw := d.GetSwarm(c)
 		return sw.Spec
 	}
 
@@ -50,7 +51,7 @@ func (s *DockerSwarmSuite) TestSwarmInit(c *check.C) {
 	d := s.AddDaemon(c, false, false)
 
 	getSpec := func() swarm.Spec {
-		sw := d.getSwarm(c)
+		sw := d.GetSwarm(c)
 		return sw.Spec
 	}
 
@@ -96,24 +97,26 @@ func (s *DockerSwarmSuite) TestSwarmInitUnspecifiedAdvertiseAddr(c *check.C) {
 func (s *DockerSwarmSuite) TestSwarmIncompatibleDaemon(c *check.C) {
 	// init swarm mode and stop a daemon
 	d := s.AddDaemon(c, true, true)
-	info, err := d.info()
+	info, err := d.SwarmInfo()
 	c.Assert(err, checker.IsNil)
 	c.Assert(info.LocalNodeState, checker.Equals, swarm.LocalNodeStateActive)
-	c.Assert(d.Stop(), checker.IsNil)
+	d.Stop(c)
 
 	// start a daemon with --cluster-store and --cluster-advertise
-	err = d.Start("--cluster-store=consul://consuladdr:consulport/some/path", "--cluster-advertise=1.1.1.1:2375")
+	err = d.StartWithError("--cluster-store=consul://consuladdr:consulport/some/path", "--cluster-advertise=1.1.1.1:2375")
 	c.Assert(err, checker.NotNil)
-	content, _ := ioutil.ReadFile(d.logFile.Name())
+	content, err := d.ReadLogFile()
+	c.Assert(err, checker.IsNil)
 	c.Assert(string(content), checker.Contains, "--cluster-store and --cluster-advertise daemon configurations are incompatible with swarm mode")
 
 	// start a daemon with --live-restore
-	err = d.Start("--live-restore")
+	err = d.StartWithError("--live-restore")
 	c.Assert(err, checker.NotNil)
-	content, _ = ioutil.ReadFile(d.logFile.Name())
+	content, err = d.ReadLogFile()
+	c.Assert(err, checker.IsNil)
 	c.Assert(string(content), checker.Contains, "--live-restore daemon configuration is incompatible with swarm mode")
 	// restart for teardown
-	c.Assert(d.Start(), checker.IsNil)
+	d.Start(c)
 }
 
 // Test case for #24090
@@ -133,9 +136,9 @@ func (s *DockerSwarmSuite) TestSwarmServiceTemplatingHostname(c *check.C) {
 	c.Assert(err, checker.IsNil, check.Commentf(out))
 
 	// make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 1)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 1)
 
-	containers := d.activeContainers()
+	containers := d.ActiveContainers()
 	out, err = d.Cmd("inspect", "--type", "container", "--format", "{{.Config.Hostname}}", containers[0])
 	c.Assert(err, checker.IsNil, check.Commentf(out))
 	c.Assert(strings.Split(out, "\n")[0], checker.Equals, "test-1", check.Commentf("hostname with templating invalid"))
@@ -211,7 +214,7 @@ func (s *DockerSwarmSuite) TestSwarmNodeTaskListFilter(c *check.C) {
 	c.Assert(strings.TrimSpace(out), checker.Not(checker.Equals), "")
 
 	// make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 3)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 3)
 
 	filter := "name=redis-cluster"
 
@@ -232,23 +235,51 @@ func (s *DockerSwarmSuite) TestSwarmNodeTaskListFilter(c *check.C) {
 func (s *DockerSwarmSuite) TestSwarmPublishAdd(c *check.C) {
 	d := s.AddDaemon(c, true, true)
 
-	name := "top"
-	out, err := d.Cmd("service", "create", "--name", name, "--label", "x=y", "busybox", "top")
-	c.Assert(err, checker.IsNil)
-	c.Assert(strings.TrimSpace(out), checker.Not(checker.Equals), "")
+	testCases := []struct {
+		name       string
+		publishAdd []string
+		ports      string
+	}{
+		{
+			name: "simple-syntax",
+			publishAdd: []string{
+				"80:80",
+				"80:80",
+				"80:80",
+				"80:20",
+			},
+			ports: "[{ tcp 80 80 ingress}]",
+		},
+		{
+			name: "complex-syntax",
+			publishAdd: []string{
+				"target=90,published=90,protocol=tcp,mode=ingress",
+				"target=90,published=90,protocol=tcp,mode=ingress",
+				"target=90,published=90,protocol=tcp,mode=ingress",
+				"target=30,published=90,protocol=tcp,mode=ingress",
+			},
+			ports: "[{ tcp 90 90 ingress}]",
+		},
+	}
 
-	out, err = d.Cmd("service", "update", "--publish-add", "80:80", name)
-	c.Assert(err, checker.IsNil)
+	for _, tc := range testCases {
+		out, err := d.Cmd("service", "create", "--name", tc.name, "--label", "x=y", "busybox", "top")
+		c.Assert(err, checker.IsNil, check.Commentf(out))
+		c.Assert(strings.TrimSpace(out), checker.Not(checker.Equals), "")
 
-	out, err = d.cmdRetryOutOfSequence("service", "update", "--publish-add", "80:80", name)
-	c.Assert(err, checker.IsNil)
+		out, err = d.CmdRetryOutOfSequence("service", "update", "--publish-add", tc.publishAdd[0], tc.name)
+		c.Assert(err, checker.IsNil, check.Commentf(out))
 
-	out, err = d.cmdRetryOutOfSequence("service", "update", "--publish-add", "80:80", "--publish-add", "80:20", name)
-	c.Assert(err, checker.NotNil)
+		out, err = d.CmdRetryOutOfSequence("service", "update", "--publish-add", tc.publishAdd[1], tc.name)
+		c.Assert(err, checker.IsNil, check.Commentf(out))
 
-	out, err = d.Cmd("service", "inspect", "--format", "{{ .Spec.EndpointSpec.Ports }}", name)
-	c.Assert(err, checker.IsNil)
-	c.Assert(strings.TrimSpace(out), checker.Equals, "[{ tcp 80 80 ingress}]")
+		out, err = d.CmdRetryOutOfSequence("service", "update", "--publish-add", tc.publishAdd[2], "--publish-add", tc.publishAdd[3], tc.name)
+		c.Assert(err, checker.NotNil, check.Commentf(out))
+
+		out, err = d.Cmd("service", "inspect", "--format", "{{ .Spec.EndpointSpec.Ports }}", tc.name)
+		c.Assert(err, checker.IsNil)
+		c.Assert(strings.TrimSpace(out), checker.Equals, tc.ports)
+	}
 }
 
 func (s *DockerSwarmSuite) TestSwarmServiceWithGroup(c *check.C) {
@@ -260,7 +291,7 @@ func (s *DockerSwarmSuite) TestSwarmServiceWithGroup(c *check.C) {
 	c.Assert(strings.TrimSpace(out), checker.Not(checker.Equals), "")
 
 	// make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 1)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 1)
 
 	out, err = d.Cmd("ps", "-q")
 	c.Assert(err, checker.IsNil)
@@ -288,7 +319,7 @@ func (s *DockerSwarmSuite) TestSwarmContainerAutoStart(c *check.C) {
 	c.Assert(err, checker.IsNil, check.Commentf(out))
 	c.Assert(strings.TrimSpace(out), checker.Not(checker.Equals), "")
 
-	d.Restart()
+	d.Restart(c)
 
 	out, err = d.Cmd("ps", "-q")
 	c.Assert(err, checker.IsNil, check.Commentf(out))
@@ -326,7 +357,7 @@ func (s *DockerSwarmSuite) TestSwarmContainerAttachByNetworkId(c *check.C) {
 	out, err = d.Cmd("run", "-d", "--net", networkID, "busybox", "top")
 	c.Assert(err, checker.IsNil)
 	cID := strings.TrimSpace(out)
-	d.waitRun(cID)
+	d.WaitRun(cID)
 
 	_, err = d.Cmd("rm", "-f", cID)
 	c.Assert(err, checker.IsNil)
@@ -449,7 +480,7 @@ func (s *DockerSwarmSuite) TestPsListContainersFilterIsTask(c *check.C) {
 	c.Assert(strings.TrimSpace(out), checker.Not(checker.Equals), "")
 
 	// make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkServiceRunningTasks(name), checker.Equals, 1)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckServiceRunningTasks(name), checker.Equals, 1)
 
 	// Filter non-tasks
 	out, err = d.Cmd("ps", "-a", "-q", "--filter=is-task=false")
@@ -664,7 +695,7 @@ func (s *DockerSwarmSuite) TestSwarmNetworkPlugin(c *check.C) {
 func (s *DockerSwarmSuite) TestSwarmServiceEnvFile(c *check.C) {
 	d := s.AddDaemon(c, true, true)
 
-	path := filepath.Join(d.folder, "env.txt")
+	path := filepath.Join(d.Folder, "env.txt")
 	err := ioutil.WriteFile(path, []byte("VAR1=A\nVAR2=A\n"), 0644)
 	c.Assert(err, checker.IsNil)
 
@@ -692,7 +723,7 @@ func (s *DockerSwarmSuite) TestSwarmServiceTTY(c *check.C) {
 	c.Assert(err, checker.IsNil)
 
 	// Make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 1)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 1)
 
 	// We need to get the container id.
 	out, err = d.Cmd("ps", "-a", "-q", "--no-trunc")
@@ -707,7 +738,7 @@ func (s *DockerSwarmSuite) TestSwarmServiceTTY(c *check.C) {
 	out, err = d.Cmd("service", "rm", name)
 	c.Assert(err, checker.IsNil)
 	// Make sure container has been destroyed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 0)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 0)
 
 	// With --tty
 	expectedOutput = "TTY"
@@ -715,7 +746,7 @@ func (s *DockerSwarmSuite) TestSwarmServiceTTY(c *check.C) {
 	c.Assert(err, checker.IsNil)
 
 	// Make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 1)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 1)
 
 	// We need to get the container id.
 	out, err = d.Cmd("ps", "-a", "-q", "--no-trunc")
@@ -736,7 +767,7 @@ func (s *DockerSwarmSuite) TestSwarmServiceTTYUpdate(c *check.C) {
 	c.Assert(err, checker.IsNil)
 
 	// Make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 1)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 1)
 
 	out, err := d.Cmd("service", "inspect", "--format", "{{ .Spec.TaskTemplate.ContainerSpec.TTY }}", name)
 	c.Assert(err, checker.IsNil)
@@ -759,7 +790,7 @@ func (s *DockerSwarmSuite) TestDNSConfig(c *check.C) {
 	c.Assert(err, checker.IsNil)
 
 	// Make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 1)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 1)
 
 	// We need to get the container id.
 	out, err := d.Cmd("ps", "-a", "-q", "--no-trunc")
@@ -786,7 +817,7 @@ func (s *DockerSwarmSuite) TestDNSConfigUpdate(c *check.C) {
 	c.Assert(err, checker.IsNil)
 
 	// Make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 1)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 1)
 
 	_, err = d.Cmd("service", "update", "--dns-add=1.2.3.4", "--dns-search-add=example.com", "--dns-option-add=timeout:3", name)
 	c.Assert(err, checker.IsNil)
@@ -796,18 +827,18 @@ func (s *DockerSwarmSuite) TestDNSConfigUpdate(c *check.C) {
 	c.Assert(strings.TrimSpace(out), checker.Equals, "{[1.2.3.4] [example.com] [timeout:3]}")
 }
 
-func getNodeStatus(c *check.C, d *SwarmDaemon) swarm.LocalNodeState {
-	info, err := d.info()
+func getNodeStatus(c *check.C, d *daemon.Swarm) swarm.LocalNodeState {
+	info, err := d.SwarmInfo()
 	c.Assert(err, checker.IsNil)
 	return info.LocalNodeState
 }
 
-func checkSwarmLockedToUnlocked(c *check.C, d *SwarmDaemon, unlockKey string) {
-	c.Assert(d.Restart(), checker.IsNil)
+func checkSwarmLockedToUnlocked(c *check.C, d *daemon.Swarm, unlockKey string) {
+	d.Restart(c)
 	status := getNodeStatus(c, d)
 	if status == swarm.LocalNodeStateLocked {
 		// it must not have updated to be unlocked in time - unlock, wait 3 seconds, and try again
-		cmd := d.command("swarm", "unlock")
+		cmd := d.Command("swarm", "unlock")
 		cmd.Stdin = bytes.NewBufferString(unlockKey)
 		out, err := cmd.CombinedOutput()
 		c.Assert(err, checker.IsNil, check.Commentf("out: %v", string(out)))
@@ -815,21 +846,44 @@ func checkSwarmLockedToUnlocked(c *check.C, d *SwarmDaemon, unlockKey string) {
 		c.Assert(getNodeStatus(c, d), checker.Equals, swarm.LocalNodeStateActive)
 
 		time.Sleep(3 * time.Second)
-		c.Assert(d.Restart(), checker.IsNil)
+		d.Restart(c)
 	}
 
 	c.Assert(getNodeStatus(c, d), checker.Equals, swarm.LocalNodeStateActive)
 }
 
-func checkSwarmUnlockedToLocked(c *check.C, d *SwarmDaemon) {
-	c.Assert(d.Restart(), checker.IsNil)
+func checkSwarmUnlockedToLocked(c *check.C, d *daemon.Swarm) {
+	d.Restart(c)
 	status := getNodeStatus(c, d)
 	if status == swarm.LocalNodeStateActive {
 		// it must not have updated to be unlocked in time - wait 3 seconds, and try again
 		time.Sleep(3 * time.Second)
-		c.Assert(d.Restart(), checker.IsNil)
+		d.Restart(c)
 	}
 	c.Assert(getNodeStatus(c, d), checker.Equals, swarm.LocalNodeStateLocked)
+}
+
+func (s *DockerSwarmSuite) TestUnlockEngineAndUnlockedSwarm(c *check.C) {
+	d := s.AddDaemon(c, false, false)
+
+	// unlocking a normal engine should return an error - it does not even ask for the key
+	cmd := d.Command("swarm", "unlock")
+	outs, err := cmd.CombinedOutput()
+
+	c.Assert(err, checker.NotNil, check.Commentf("out: %v", string(outs)))
+	c.Assert(string(outs), checker.Contains, "Error: This node is not part of a swarm")
+	c.Assert(string(outs), checker.Not(checker.Contains), "Please enter unlock key")
+
+	_, err = d.Cmd("swarm", "init")
+	c.Assert(err, checker.IsNil)
+
+	// unlocking an unlocked swarm should return an error - it does not even ask for the key
+	cmd = d.Command("swarm", "unlock")
+	outs, err = cmd.CombinedOutput()
+
+	c.Assert(err, checker.NotNil, check.Commentf("out: %v", string(outs)))
+	c.Assert(string(outs), checker.Contains, "Error: swarm is not locked")
+	c.Assert(string(outs), checker.Not(checker.Contains), "Please enter unlock key")
 }
 
 func (s *DockerSwarmSuite) TestSwarmInitLocked(c *check.C) {
@@ -856,10 +910,10 @@ func (s *DockerSwarmSuite) TestSwarmInitLocked(c *check.C) {
 	c.Assert(getNodeStatus(c, d), checker.Equals, swarm.LocalNodeStateActive)
 
 	// It starts off locked
-	c.Assert(d.Restart(), checker.IsNil)
+	d.Restart(c)
 	c.Assert(getNodeStatus(c, d), checker.Equals, swarm.LocalNodeStateLocked)
 
-	cmd := d.command("swarm", "unlock")
+	cmd := d.Command("swarm", "unlock")
 	cmd.Stdin = bytes.NewBufferString("wrong-secret-key")
 	out, err := cmd.CombinedOutput()
 	c.Assert(err, checker.NotNil, check.Commentf("out: %v", string(out)))
@@ -867,7 +921,7 @@ func (s *DockerSwarmSuite) TestSwarmInitLocked(c *check.C) {
 
 	c.Assert(getNodeStatus(c, d), checker.Equals, swarm.LocalNodeStateLocked)
 
-	cmd = d.command("swarm", "unlock")
+	cmd = d.Command("swarm", "unlock")
 	cmd.Stdin = bytes.NewBufferString(unlockKey)
 	out, err = cmd.CombinedOutput()
 	c.Assert(err, checker.IsNil, check.Commentf("out: %v", string(out)))
@@ -895,26 +949,31 @@ func (s *DockerSwarmSuite) TestSwarmLeaveLocked(c *check.C) {
 	c.Assert(err, checker.IsNil, check.Commentf("out: %v", outs))
 
 	// It starts off locked
-	c.Assert(d.Restart("--swarm-default-advertise-addr=lo"), checker.IsNil)
+	d.Restart(c, "--swarm-default-advertise-addr=lo")
 
-	info, err := d.info()
+	info, err := d.SwarmInfo()
 	c.Assert(err, checker.IsNil)
 	c.Assert(info.LocalNodeState, checker.Equals, swarm.LocalNodeStateLocked)
 
 	outs, _ = d.Cmd("node", "ls")
 	c.Assert(outs, checker.Contains, "Swarm is encrypted and needs to be unlocked")
 
+	// `docker swarm leave` a locked swarm without --force will return an error
+	outs, _ = d.Cmd("swarm", "leave")
+	c.Assert(outs, checker.Contains, "Swarm is encrypted and locked.")
+
+	// It is OK for user to leave a locked swarm with --force
 	outs, err = d.Cmd("swarm", "leave", "--force")
 	c.Assert(err, checker.IsNil, check.Commentf("out: %v", outs))
 
-	info, err = d.info()
+	info, err = d.SwarmInfo()
 	c.Assert(err, checker.IsNil)
 	c.Assert(info.LocalNodeState, checker.Equals, swarm.LocalNodeStateInactive)
 
 	outs, err = d.Cmd("swarm", "init")
 	c.Assert(err, checker.IsNil, check.Commentf("out: %v", outs))
 
-	info, err = d.info()
+	info, err = d.SwarmInfo()
 	c.Assert(err, checker.IsNil)
 	c.Assert(info.LocalNodeState, checker.Equals, swarm.LocalNodeStateActive)
 }
@@ -925,11 +984,11 @@ func (s *DockerSwarmSuite) TestSwarmLockUnlockCluster(c *check.C) {
 	d3 := s.AddDaemon(c, true, true)
 
 	// they start off unlocked
-	c.Assert(d2.Restart(), checker.IsNil)
+	d2.Restart(c)
 	c.Assert(getNodeStatus(c, d2), checker.Equals, swarm.LocalNodeStateActive)
 
 	// stop this one so it does not get autolock info
-	c.Assert(d2.Stop(), checker.IsNil)
+	d2.Stop(c)
 
 	// enable autolock
 	outs, err := d1.Cmd("swarm", "update", "--autolock")
@@ -951,10 +1010,10 @@ func (s *DockerSwarmSuite) TestSwarmLockUnlockCluster(c *check.C) {
 	c.Assert(outs, checker.Equals, unlockKey+"\n")
 
 	// The ones that got the cluster update should be set to locked
-	for _, d := range []*SwarmDaemon{d1, d3} {
+	for _, d := range []*daemon.Swarm{d1, d3} {
 		checkSwarmUnlockedToLocked(c, d)
 
-		cmd := d.command("swarm", "unlock")
+		cmd := d.Command("swarm", "unlock")
 		cmd.Stdin = bytes.NewBufferString(unlockKey)
 		out, err := cmd.CombinedOutput()
 		c.Assert(err, checker.IsNil, check.Commentf("out: %v", string(out)))
@@ -962,7 +1021,7 @@ func (s *DockerSwarmSuite) TestSwarmLockUnlockCluster(c *check.C) {
 	}
 
 	// d2 never got the cluster update, so it is still set to unlocked
-	c.Assert(d2.Start(), checker.IsNil)
+	d2.Start(c)
 	c.Assert(getNodeStatus(c, d2), checker.Equals, swarm.LocalNodeStateActive)
 
 	// d2 is now set to lock
@@ -973,7 +1032,7 @@ func (s *DockerSwarmSuite) TestSwarmLockUnlockCluster(c *check.C) {
 	c.Assert(err, checker.IsNil, check.Commentf("out: %v", outs))
 
 	// the ones that got the update are now set to unlocked
-	for _, d := range []*SwarmDaemon{d1, d3} {
+	for _, d := range []*daemon.Swarm{d1, d3} {
 		checkSwarmLockedToUnlocked(c, d, unlockKey)
 	}
 
@@ -981,7 +1040,7 @@ func (s *DockerSwarmSuite) TestSwarmLockUnlockCluster(c *check.C) {
 	c.Assert(getNodeStatus(c, d2), checker.Equals, swarm.LocalNodeStateLocked)
 
 	// unlock it
-	cmd := d2.command("swarm", "unlock")
+	cmd := d2.Command("swarm", "unlock")
 	cmd.Stdin = bytes.NewBufferString(unlockKey)
 	out, err := cmd.CombinedOutput()
 	c.Assert(err, checker.IsNil, check.Commentf("out: %v", string(out)))
@@ -992,7 +1051,7 @@ func (s *DockerSwarmSuite) TestSwarmLockUnlockCluster(c *check.C) {
 
 	// managers who join now are never set to locked in the first place
 	d4 := s.AddDaemon(c, true, true)
-	c.Assert(d4.Restart(), checker.IsNil)
+	d4.Restart(c)
 	c.Assert(getNodeStatus(c, d4), checker.Equals, swarm.LocalNodeStateActive)
 }
 
@@ -1020,7 +1079,7 @@ func (s *DockerSwarmSuite) TestSwarmJoinPromoteLocked(c *check.C) {
 
 	// joined workers start off unlocked
 	d2 := s.AddDaemon(c, true, false)
-	c.Assert(d2.Restart(), checker.IsNil)
+	d2.Restart(c)
 	c.Assert(getNodeStatus(c, d2), checker.Equals, swarm.LocalNodeStateActive)
 
 	// promote worker
@@ -1032,30 +1091,42 @@ func (s *DockerSwarmSuite) TestSwarmJoinPromoteLocked(c *check.C) {
 	d3 := s.AddDaemon(c, true, true)
 
 	// both new nodes are locked
-	for _, d := range []*SwarmDaemon{d2, d3} {
+	for _, d := range []*daemon.Swarm{d2, d3} {
 		checkSwarmUnlockedToLocked(c, d)
 
-		cmd := d.command("swarm", "unlock")
+		cmd := d.Command("swarm", "unlock")
 		cmd.Stdin = bytes.NewBufferString(unlockKey)
 		out, err := cmd.CombinedOutput()
 		c.Assert(err, checker.IsNil, check.Commentf("out: %v", string(out)))
 		c.Assert(getNodeStatus(c, d), checker.Equals, swarm.LocalNodeStateActive)
 	}
 
+	// get d3's cert
+	d3cert, err := ioutil.ReadFile(filepath.Join(d3.Folder, "root", "swarm", "certificates", "swarm-node.crt"))
+	c.Assert(err, checker.IsNil)
+
 	// demote manager back to worker - workers are not locked
 	outs, err = d1.Cmd("node", "demote", d3.Info.NodeID)
 	c.Assert(err, checker.IsNil)
 	c.Assert(outs, checker.Contains, "demoted in the swarm")
 
-	// verify that it's been demoted
-	out, err := d1.Cmd("node", "ls", "--filter", "id="+d3.Info.NodeID)
-	c.Assert(err, checker.IsNil)
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	c.Assert(len(lines), checker.GreaterThan, 0)
-	columns := strings.Fields(lines[len(lines)-1])
-	c.Assert(columns, checker.HasLen, 4) // if it was a manager it'd have a manager status field
+	// Wait for it to actually be demoted, for the key and cert to be replaced.
+	// Then restart and assert that the node is not locked.  If we don't wait for the cert
+	// to be replaced, then the node still has the manager TLS key which is still locked
+	// (because we never want a manager TLS key to be on disk unencrypted if the cluster
+	// is set to autolock)
+	waitAndAssert(c, defaultReconciliationTimeout, d3.CheckControlAvailable, checker.False)
+	waitAndAssert(c, defaultReconciliationTimeout, func(c *check.C) (interface{}, check.CommentInterface) {
+		cert, err := ioutil.ReadFile(filepath.Join(d3.Folder, "root", "swarm", "certificates", "swarm-node.crt"))
+		if err != nil {
+			return "", check.Commentf("error: %v", err)
+		}
+		return string(cert), check.Commentf("cert: %v", string(cert))
+	}, checker.Not(checker.Equals), string(d3cert))
 
-	checkSwarmLockedToUnlocked(c, d3, unlockKey)
+	// by now, it should *never* be locked on restart
+	d3.Restart(c)
+	c.Assert(getNodeStatus(c, d3), checker.Equals, swarm.LocalNodeStateActive)
 }
 
 func (s *DockerSwarmSuite) TestSwarmRotateUnlockKey(c *check.C) {
@@ -1088,13 +1159,13 @@ func (s *DockerSwarmSuite) TestSwarmRotateUnlockKey(c *check.C) {
 		c.Assert(newUnlockKey, checker.Not(checker.Equals), "")
 		c.Assert(newUnlockKey, checker.Not(checker.Equals), unlockKey)
 
-		c.Assert(d.Restart(), checker.IsNil)
+		d.Restart(c)
 		c.Assert(getNodeStatus(c, d), checker.Equals, swarm.LocalNodeStateLocked)
 
 		outs, _ = d.Cmd("node", "ls")
 		c.Assert(outs, checker.Contains, "Swarm is encrypted and needs to be unlocked")
 
-		cmd := d.command("swarm", "unlock")
+		cmd := d.Command("swarm", "unlock")
 		cmd.Stdin = bytes.NewBufferString(unlockKey)
 		out, err := cmd.CombinedOutput()
 
@@ -1109,9 +1180,9 @@ func (s *DockerSwarmSuite) TestSwarmRotateUnlockKey(c *check.C) {
 
 			time.Sleep(3 * time.Second)
 
-			c.Assert(d.Restart(), checker.IsNil)
+			d.Restart(c)
 
-			cmd = d.command("swarm", "unlock")
+			cmd = d.Command("swarm", "unlock")
 			cmd.Stdin = bytes.NewBufferString(unlockKey)
 			out, err = cmd.CombinedOutput()
 		}
@@ -1121,7 +1192,7 @@ func (s *DockerSwarmSuite) TestSwarmRotateUnlockKey(c *check.C) {
 		outs, _ = d.Cmd("node", "ls")
 		c.Assert(outs, checker.Contains, "Swarm is encrypted and needs to be unlocked")
 
-		cmd = d.command("swarm", "unlock")
+		cmd = d.Command("swarm", "unlock")
 		cmd.Stdin = bytes.NewBufferString(newUnlockKey)
 		out, err = cmd.CombinedOutput()
 		c.Assert(err, checker.IsNil, check.Commentf("out: %v", string(out)))
@@ -1171,16 +1242,16 @@ func (s *DockerSwarmSuite) TestSwarmClusterRotateUnlockKey(c *check.C) {
 		c.Assert(newUnlockKey, checker.Not(checker.Equals), "")
 		c.Assert(newUnlockKey, checker.Not(checker.Equals), unlockKey)
 
-		c.Assert(d2.Restart(), checker.IsNil)
-		c.Assert(d3.Restart(), checker.IsNil)
+		d2.Restart(c)
+		d3.Restart(c)
 
-		for _, d := range []*SwarmDaemon{d2, d3} {
+		for _, d := range []*daemon.Swarm{d2, d3} {
 			c.Assert(getNodeStatus(c, d), checker.Equals, swarm.LocalNodeStateLocked)
 
 			outs, _ := d.Cmd("node", "ls")
 			c.Assert(outs, checker.Contains, "Swarm is encrypted and needs to be unlocked")
 
-			cmd := d.command("swarm", "unlock")
+			cmd := d.Command("swarm", "unlock")
 			cmd.Stdin = bytes.NewBufferString(unlockKey)
 			out, err := cmd.CombinedOutput()
 
@@ -1195,9 +1266,9 @@ func (s *DockerSwarmSuite) TestSwarmClusterRotateUnlockKey(c *check.C) {
 
 				time.Sleep(3 * time.Second)
 
-				c.Assert(d.Restart(), checker.IsNil)
+				d.Restart(c)
 
-				cmd = d.command("swarm", "unlock")
+				cmd = d.Command("swarm", "unlock")
 				cmd.Stdin = bytes.NewBufferString(unlockKey)
 				out, err = cmd.CombinedOutput()
 			}
@@ -1207,7 +1278,7 @@ func (s *DockerSwarmSuite) TestSwarmClusterRotateUnlockKey(c *check.C) {
 			outs, _ = d.Cmd("node", "ls")
 			c.Assert(outs, checker.Contains, "Swarm is encrypted and needs to be unlocked")
 
-			cmd = d.command("swarm", "unlock")
+			cmd = d.Command("swarm", "unlock")
 			cmd.Stdin = bytes.NewBufferString(newUnlockKey)
 			out, err = cmd.CombinedOutput()
 			c.Assert(err, checker.IsNil, check.Commentf("out: %v", string(out)))
@@ -1243,7 +1314,7 @@ func (s *DockerSwarmSuite) TestSwarmAlternateLockUnlock(c *check.C) {
 		c.Assert(unlockKey, checker.Not(checker.Equals), "")
 		checkSwarmUnlockedToLocked(c, d)
 
-		cmd := d.command("swarm", "unlock")
+		cmd := d.Command("swarm", "unlock")
 		cmd.Stdin = bytes.NewBufferString(unlockKey)
 		out, err := cmd.CombinedOutput()
 		c.Assert(err, checker.IsNil, check.Commentf("out: %v", string(out)))
@@ -1266,7 +1337,7 @@ func (s *DockerSwarmSuite) TestExtraHosts(c *check.C) {
 	c.Assert(err, checker.IsNil)
 
 	// Make sure task has been deployed.
-	waitAndAssert(c, defaultReconciliationTimeout, d.checkActiveContainerCount, checker.Equals, 1)
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 1)
 
 	// We need to get the container id.
 	out, err := d.Cmd("ps", "-a", "-q", "--no-trunc")
@@ -1286,7 +1357,7 @@ func (s *DockerSwarmSuite) TestSwarmManagerAddress(c *check.C) {
 	d3 := s.AddDaemon(c, true, false)
 
 	// Manager Addresses will always show Node 1's address
-	expectedOutput := fmt.Sprintf("Manager Addresses:\n  127.0.0.1:%d\n", d1.port)
+	expectedOutput := fmt.Sprintf("Manager Addresses:\n  127.0.0.1:%d\n", d1.Port)
 
 	out, err := d1.Cmd("info")
 	c.Assert(err, checker.IsNil)
@@ -1315,4 +1386,172 @@ Resources:
 	out, err = d.Cmd("service", "inspect", "--pretty", name)
 	c.Assert(err, checker.IsNil, check.Commentf(out))
 	c.Assert(out, checker.Contains, expectedOutput, check.Commentf(out))
+}
+
+func (s *DockerSwarmSuite) TestSwarmNetworkIPAMOptions(c *check.C) {
+	d := s.AddDaemon(c, true, true)
+
+	out, err := d.Cmd("network", "create", "-d", "overlay", "--ipam-opt", "foo=bar", "foo")
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+	c.Assert(strings.TrimSpace(out), checker.Not(checker.Equals), "")
+
+	out, err = d.Cmd("network", "inspect", "--format", "{{.IPAM.Options}}", "foo")
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+	c.Assert(strings.TrimSpace(out), checker.Equals, "map[foo:bar]")
+
+	out, err = d.Cmd("service", "create", "--network=foo", "--name", "top", "busybox", "top")
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+
+	// make sure task has been deployed.
+	waitAndAssert(c, defaultReconciliationTimeout, d.CheckActiveContainerCount, checker.Equals, 1)
+
+	out, err = d.Cmd("network", "inspect", "--format", "{{.IPAM.Options}}", "foo")
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+	c.Assert(strings.TrimSpace(out), checker.Equals, "map[foo:bar]")
+}
+
+// TODO: migrate to a unit test
+// This test could be migrated to unit test and save costly integration test,
+// once PR #29143 is merged.
+func (s *DockerSwarmSuite) TestSwarmUpdateWithoutArgs(c *check.C) {
+	d := s.AddDaemon(c, true, true)
+
+	expectedOutput := `
+Usage:	docker swarm update [OPTIONS]
+
+Update the swarm
+
+Options:`
+
+	out, err := d.Cmd("swarm", "update")
+	c.Assert(err, checker.IsNil, check.Commentf("out: %v", out))
+	c.Assert(out, checker.Contains, expectedOutput, check.Commentf(out))
+}
+
+func (s *DockerTrustedSwarmSuite) TestTrustedServiceCreate(c *check.C) {
+	d := s.swarmSuite.AddDaemon(c, true, true)
+
+	// Attempt creating a service from an image that is known to notary.
+	repoName := s.trustSuite.setupTrustedImage(c, "trusted-pull")
+
+	name := "trusted"
+	serviceCmd := d.Command("-D", "service", "create", "--name", name, repoName, "top")
+	s.trustSuite.trustedCmd(serviceCmd)
+	out, _, err := runCommandWithOutput(serviceCmd)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, "resolved image tag to", check.Commentf(out))
+
+	out, err = d.Cmd("service", "inspect", "--pretty", name)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, repoName+"@", check.Commentf(out))
+
+	// Try trusted service create on an untrusted tag.
+
+	repoName = fmt.Sprintf("%v/untrustedservicecreate/createtest:latest", privateRegistryURL)
+	// tag the image and upload it to the private registry
+	dockerCmd(c, "tag", "busybox", repoName)
+	dockerCmd(c, "push", repoName)
+	dockerCmd(c, "rmi", repoName)
+
+	name = "untrusted"
+	serviceCmd = d.Command("service", "create", "--name", name, repoName, "top")
+	s.trustSuite.trustedCmd(serviceCmd)
+	out, _, err = runCommandWithOutput(serviceCmd)
+
+	c.Assert(err, check.NotNil, check.Commentf(out))
+	c.Assert(string(out), checker.Contains, "Error: remote trust data does not exist", check.Commentf(out))
+
+	out, err = d.Cmd("service", "inspect", "--pretty", name)
+	c.Assert(err, checker.NotNil, check.Commentf(out))
+}
+
+func (s *DockerTrustedSwarmSuite) TestTrustedServiceUpdate(c *check.C) {
+	d := s.swarmSuite.AddDaemon(c, true, true)
+
+	// Attempt creating a service from an image that is known to notary.
+	repoName := s.trustSuite.setupTrustedImage(c, "trusted-pull")
+
+	name := "myservice"
+
+	// Create a service without content trust
+	_, err := d.Cmd("service", "create", "--name", name, repoName, "top")
+	c.Assert(err, checker.IsNil)
+
+	out, err := d.Cmd("service", "inspect", "--pretty", name)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+	// Daemon won't insert the digest because this is disabled by
+	// DOCKER_SERVICE_PREFER_OFFLINE_IMAGE.
+	c.Assert(out, check.Not(checker.Contains), repoName+"@", check.Commentf(out))
+
+	serviceCmd := d.Command("-D", "service", "update", "--image", repoName, name)
+	s.trustSuite.trustedCmd(serviceCmd)
+	out, _, err = runCommandWithOutput(serviceCmd)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, "resolved image tag to", check.Commentf(out))
+
+	out, err = d.Cmd("service", "inspect", "--pretty", name)
+	c.Assert(err, checker.IsNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, repoName+"@", check.Commentf(out))
+
+	// Try trusted service update on an untrusted tag.
+
+	repoName = fmt.Sprintf("%v/untrustedservicecreate/createtest:latest", privateRegistryURL)
+	// tag the image and upload it to the private registry
+	dockerCmd(c, "tag", "busybox", repoName)
+	dockerCmd(c, "push", repoName)
+	dockerCmd(c, "rmi", repoName)
+
+	serviceCmd = d.Command("service", "update", "--image", repoName, name)
+	s.trustSuite.trustedCmd(serviceCmd)
+	out, _, err = runCommandWithOutput(serviceCmd)
+
+	c.Assert(err, check.NotNil, check.Commentf(out))
+	c.Assert(string(out), checker.Contains, "Error: remote trust data does not exist", check.Commentf(out))
+}
+
+// Test case for issue #27866, which did not allow NW name that is the prefix of a swarm NW ID.
+// e.g. if the ingress ID starts with "n1", it was impossible to create a NW named "n1".
+func (s *DockerSwarmSuite) TestSwarmNetworkCreateIssue27866(c *check.C) {
+	d := s.AddDaemon(c, true, true)
+	out, err := d.Cmd("network", "inspect", "-f", "{{.Id}}", "ingress")
+	c.Assert(err, checker.IsNil, check.Commentf("out: %v", out))
+	ingressID := strings.TrimSpace(out)
+	c.Assert(ingressID, checker.Not(checker.Equals), "")
+
+	// create a network of which name is the prefix of the ID of an overlay network
+	// (ingressID in this case)
+	newNetName := ingressID[0:2]
+	out, err = d.Cmd("network", "create", "--driver", "overlay", newNetName)
+	// In #27866, it was failing because of "network with name %s already exists"
+	c.Assert(err, checker.IsNil, check.Commentf("out: %v", out))
+	out, err = d.Cmd("network", "rm", newNetName)
+	c.Assert(err, checker.IsNil, check.Commentf("out: %v", out))
+}
+
+// Test case for https://github.com/docker/docker/pull/27938#issuecomment-265768303
+// This test creates two networks with the same name sequentially, with various drivers.
+// Since the operations in this test are done sequentially, the 2nd call should fail with
+// "network with name FOO already exists".
+// Note that it is to ok have multiple networks with the same name if the operations are done
+// in parallel. (#18864)
+func (s *DockerSwarmSuite) TestSwarmNetworkCreateDup(c *check.C) {
+	d := s.AddDaemon(c, true, true)
+	drivers := []string{"bridge", "overlay"}
+	for i, driver1 := range drivers {
+		nwName := fmt.Sprintf("network-test-%d", i)
+		for _, driver2 := range drivers {
+			c.Logf("Creating a network named %q with %q, then %q",
+				nwName, driver1, driver2)
+			out, err := d.Cmd("network", "create", "--driver", driver1, nwName)
+			c.Assert(err, checker.IsNil, check.Commentf("out: %v", out))
+			out, err = d.Cmd("network", "create", "--driver", driver2, nwName)
+			c.Assert(out, checker.Contains,
+				fmt.Sprintf("network with name %s already exists", nwName))
+			c.Assert(err, checker.NotNil)
+			c.Logf("As expected, the attempt to network %q with %q failed: %s",
+				nwName, driver2, out)
+			out, err = d.Cmd("network", "rm", nwName)
+			c.Assert(err, checker.IsNil, check.Commentf("out: %v", out))
+		}
+	}
 }

@@ -71,7 +71,7 @@ func (s *DockerSuite) TestRunLookupGoogleDNS(c *check.C) {
 		// nslookup isn't present in nanoserver. Hence just use PowerShell...
 		dockerCmd(c, "run", WindowsBaseImage, "powershell", "Resolve-DNSName", "google.com")
 	} else {
-		dockerCmd(c, "run", DefaultImage, "nslookup", "google.com")
+		dockerCmd(c, "run", "busybox", "nslookup", "google.com")
 	}
 
 }
@@ -623,13 +623,14 @@ func (s *DockerSuite) TestRunCreateVolume(c *check.C) {
 func (s *DockerSuite) TestRunCreateVolumeWithSymlink(c *check.C) {
 	// Cannot run on Windows as relies on Linux-specific functionality (sh -c mount...)
 	testRequires(c, DaemonIsLinux)
+	workingDirectory, err := ioutil.TempDir("", "TestRunCreateVolumeWithSymlink")
 	image := "docker-test-createvolumewithsymlink"
 
 	buildCmd := exec.Command(dockerBinary, "build", "-t", image, "-")
 	buildCmd.Stdin = strings.NewReader(`FROM busybox
 		RUN ln -s home /bar`)
 	buildCmd.Dir = workingDirectory
-	err := buildCmd.Run()
+	err = buildCmd.Run()
 	if err != nil {
 		c.Fatalf("could not build '%s': %v", image, err)
 	}
@@ -658,6 +659,9 @@ func (s *DockerSuite) TestRunVolumesFromSymlinkPath(c *check.C) {
 	// This test cannot run on a Windows daemon as
 	// Windows does not support symlinks inside a volume path
 	testRequires(c, DaemonIsLinux)
+
+	workingDirectory, err := ioutil.TempDir("", "TestRunVolumesFromSymlinkPath")
+	c.Assert(err, checker.IsNil)
 	name := "docker-test-volumesfromsymlinkpath"
 	prefix := ""
 	dfContents := `FROM busybox
@@ -676,7 +680,7 @@ func (s *DockerSuite) TestRunVolumesFromSymlinkPath(c *check.C) {
 	buildCmd := exec.Command(dockerBinary, "build", "-t", name, "-")
 	buildCmd.Stdin = strings.NewReader(dfContents)
 	buildCmd.Dir = workingDirectory
-	err := buildCmd.Run()
+	err = buildCmd.Run()
 	if err != nil {
 		c.Fatalf("could not build 'docker-test-volumesfromsymlinkpath': %v", err)
 	}
@@ -4354,42 +4358,6 @@ func (s *DockerSuite) TestRunVolumeCopyFlag(c *check.C) {
 	c.Assert(err, checker.NotNil, check.Commentf(out))
 }
 
-func (s *DockerSuite) TestRunTooLongHostname(c *check.C) {
-	// Test case in #21445
-	hostname1 := "this-is-a-way-too-long-hostname-but-it-should-give-a-nice-error.local"
-	out, _, err := dockerCmdWithError("run", "--hostname", hostname1, "busybox", "echo", "test")
-	c.Assert(err, checker.NotNil, check.Commentf("Expected docker run to fail!"))
-	c.Assert(out, checker.Contains, "invalid hostname format:", check.Commentf("Expected to have 'invalid hostname format:' in the output, get: %s!", out))
-
-	// Additional test cases
-	validHostnames := map[string]string{
-		"hostname":    "hostname",
-		"host-name":   "host-name",
-		"hostname123": "hostname123",
-		"123hostname": "123hostname",
-		"hostname-of-63-bytes-long-should-be-valid-and-without-any-error": "hostname-of-63-bytes-long-should-be-valid-and-without-any-error",
-	}
-	for hostname := range validHostnames {
-		dockerCmd(c, "run", "--hostname", hostname, "busybox", "echo", "test")
-	}
-
-	invalidHostnames := map[string]string{
-		"^hostname": "invalid hostname format: ^hostname",
-		"hostname%": "invalid hostname format: hostname%",
-		"host&name": "invalid hostname format: host&name",
-		"-hostname": "invalid hostname format: -hostname",
-		"host_name": "invalid hostname format: host_name",
-		"hostname-of-64-bytes-long-should-be-invalid-and-be-with-an-error": "invalid hostname format: hostname-of-64-bytes-long-should-be-invalid-and-be-with-an-error",
-	}
-
-	for hostname, expectedError := range invalidHostnames {
-		out, _, err = dockerCmdWithError("run", "--hostname", hostname, "busybox", "echo", "test")
-		c.Assert(err, checker.NotNil, check.Commentf("Expected docker run to fail!"))
-		c.Assert(out, checker.Contains, expectedError, check.Commentf("Expected to have '%s' in the output, get: %s!", expectedError, out))
-
-	}
-}
-
 // Test case for #21976
 func (s *DockerSuite) TestRunDNSInHostMode(c *check.C) {
 	testRequires(c, DaemonIsLinux, NotUserNamespace)
@@ -4470,12 +4438,12 @@ exec "$@"`,
 }
 
 func (s *DockerDaemonSuite) TestRunWithUlimitAndDaemonDefault(c *check.C) {
-	c.Assert(s.d.StartWithBusybox("--debug", "--default-ulimit=nofile=65535"), checker.IsNil)
+	s.d.StartWithBusybox(c, "--debug", "--default-ulimit=nofile=65535")
 
 	name := "test-A"
 	_, err := s.d.Cmd("run", "--name", name, "-d", "busybox", "top")
 	c.Assert(err, checker.IsNil)
-	c.Assert(s.d.waitRun(name), check.IsNil)
+	c.Assert(s.d.WaitRun(name), check.IsNil)
 
 	out, err := s.d.Cmd("inspect", "--format", "{{.HostConfig.Ulimits}}", name)
 	c.Assert(err, checker.IsNil)
@@ -4484,7 +4452,7 @@ func (s *DockerDaemonSuite) TestRunWithUlimitAndDaemonDefault(c *check.C) {
 	name = "test-B"
 	_, err = s.d.Cmd("run", "--name", name, "--ulimit=nofile=42", "-d", "busybox", "top")
 	c.Assert(err, checker.IsNil)
-	c.Assert(s.d.waitRun(name), check.IsNil)
+	c.Assert(s.d.WaitRun(name), check.IsNil)
 
 	out, err = s.d.Cmd("inspect", "--format", "{{.HostConfig.Ulimits}}", name)
 	c.Assert(err, checker.IsNil)
@@ -4682,4 +4650,26 @@ type delayedReader struct{}
 func (s *delayedReader) Read([]byte) (int, error) {
 	time.Sleep(500 * time.Millisecond)
 	return 0, io.EOF
+}
+
+// #28823 (originally #28639)
+func (s *DockerSuite) TestRunMountReadOnlyDevShm(c *check.C) {
+	testRequires(c, SameHostDaemon, DaemonIsLinux)
+	emptyDir, err := ioutil.TempDir("", "test-read-only-dev-shm")
+	c.Assert(err, check.IsNil)
+	defer os.RemoveAll(emptyDir)
+	out, _, err := dockerCmdWithError("run", "--rm", "--read-only",
+		"-v", fmt.Sprintf("%s:/dev/shm:ro", emptyDir),
+		"busybox", "touch", "/dev/shm/foo")
+	c.Assert(err, checker.NotNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, "Read-only file system")
+}
+
+// Test case for 29129
+func (s *DockerSuite) TestRunHostnameInHostMode(c *check.C) {
+	testRequires(c, DaemonIsLinux)
+
+	expectedOutput := "foobar\nfoobar"
+	out, _ := dockerCmd(c, "run", "--net=host", "--hostname=foobar", "busybox", "sh", "-c", `echo $HOSTNAME && hostname`)
+	c.Assert(strings.TrimSpace(out), checker.Equals, expectedOutput)
 }

@@ -21,7 +21,7 @@ const allowV1PluginsFallback bool = true
 
 /* defaultAPIVersion is the version of the plugin API for volume, network,
    IPAM and authz. This is a very stable API. When we update this API, then
-   pluginType should include a version. eg "networkdriver/2.0".
+   pluginType should include a version. e.g. "networkdriver/2.0".
 */
 const defaultAPIVersion string = "1.0"
 
@@ -29,6 +29,13 @@ const defaultAPIVersion string = "1.0"
 type ErrNotFound string
 
 func (name ErrNotFound) Error() string { return fmt.Sprintf("plugin %q not found", string(name)) }
+
+// ErrAmbiguous indicates that a plugin was not found locally.
+type ErrAmbiguous string
+
+func (name ErrAmbiguous) Error() string {
+	return fmt.Sprintf("multiple plugins found for %q", string(name))
+}
 
 // GetByName retreives a plugin by name.
 func (ps *Store) GetByName(name string) (*v2.Plugin, error) {
@@ -106,6 +113,13 @@ func (ps *Store) Add(p *v2.Plugin) error {
 	if v, exist := ps.plugins[p.GetID()]; exist {
 		return fmt.Errorf("plugin %q has the same ID %s as %q", p.Name(), p.GetID(), v.Name())
 	}
+	// Since both Pull() and CreateFromContext() calls GetByName() before any plugin
+	// to search for collision (to fail fast), it is unlikely the following check
+	// will return an error.
+	// However, in case two CreateFromContext() are called at the same time,
+	// there is still a remote possibility that a collision might happen.
+	// For that reason we still perform the collision check below as it is protected
+	// by ps.Lock() and ps.Unlock() above.
 	if _, exist := ps.nameToID[p.Name()]; exist {
 		return fmt.Errorf("plugin %q already exists", p.Name())
 	}
@@ -167,9 +181,7 @@ func (ps *Store) Get(name, capability string, mode int) (plugingetter.CompatPlug
 		}
 		p, err = ps.GetByName(fullName)
 		if err == nil {
-			p.Lock()
-			p.RefCount += mode
-			p.Unlock()
+			p.AddRefCount(mode)
 			if p.IsEnabled() {
 				return p.FilterByCap(capability)
 			}
@@ -252,4 +264,26 @@ func (ps *Store) CallHandler(p *v2.Plugin) {
 			handler(p.Name(), p.Client())
 		}
 	}
+}
+
+// Search retreives a plugin by ID Prefix
+// If no plugin is found, then ErrNotFound is returned
+// If multiple plugins are found, then ErrAmbiguous is returned
+func (ps *Store) Search(partialID string) (*v2.Plugin, error) {
+	ps.RLock()
+	defer ps.RUnlock()
+
+	var found *v2.Plugin
+	for id, p := range ps.plugins {
+		if strings.HasPrefix(id, partialID) {
+			if found != nil {
+				return nil, ErrAmbiguous(partialID)
+			}
+			found = p
+		}
+	}
+	if found == nil {
+		return nil, ErrNotFound(partialID)
+	}
+	return found, nil
 }

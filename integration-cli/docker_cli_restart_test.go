@@ -74,7 +74,7 @@ func (s *DockerSuite) TestRestartWithVolumes(c *check.C) {
 }
 
 func (s *DockerSuite) TestRestartPolicyNO(c *check.C) {
-	out, _ := dockerCmd(c, "run", "-d", "--restart=no", "busybox", "false")
+	out, _ := dockerCmd(c, "create", "--restart=no", "busybox")
 
 	id := strings.TrimSpace(string(out))
 	name := inspectField(c, id, "HostConfig.RestartPolicy.Name")
@@ -82,7 +82,7 @@ func (s *DockerSuite) TestRestartPolicyNO(c *check.C) {
 }
 
 func (s *DockerSuite) TestRestartPolicyAlways(c *check.C) {
-	out, _ := dockerCmd(c, "run", "-d", "--restart=always", "busybox", "false")
+	out, _ := dockerCmd(c, "create", "--restart=always", "busybox")
 
 	id := strings.TrimSpace(string(out))
 	name := inspectField(c, id, "HostConfig.RestartPolicy.Name")
@@ -95,12 +95,36 @@ func (s *DockerSuite) TestRestartPolicyAlways(c *check.C) {
 }
 
 func (s *DockerSuite) TestRestartPolicyOnFailure(c *check.C) {
-	out, _ := dockerCmd(c, "run", "-d", "--restart=on-failure:1", "busybox", "false")
+	out, _, err := dockerCmdWithError("create", "--restart=on-failure:-1", "busybox")
+	c.Assert(err, check.NotNil, check.Commentf(out))
+	c.Assert(out, checker.Contains, "maximum retry count cannot be negative")
+
+	out, _ = dockerCmd(c, "create", "--restart=on-failure:1", "busybox")
 
 	id := strings.TrimSpace(string(out))
 	name := inspectField(c, id, "HostConfig.RestartPolicy.Name")
-	c.Assert(name, checker.Equals, "on-failure")
+	maxRetry := inspectField(c, id, "HostConfig.RestartPolicy.MaximumRetryCount")
 
+	c.Assert(name, checker.Equals, "on-failure")
+	c.Assert(maxRetry, checker.Equals, "1")
+
+	out, _ = dockerCmd(c, "create", "--restart=on-failure:0", "busybox")
+
+	id = strings.TrimSpace(string(out))
+	name = inspectField(c, id, "HostConfig.RestartPolicy.Name")
+	maxRetry = inspectField(c, id, "HostConfig.RestartPolicy.MaximumRetryCount")
+
+	c.Assert(name, checker.Equals, "on-failure")
+	c.Assert(maxRetry, checker.Equals, "0")
+
+	out, _ = dockerCmd(c, "create", "--restart=on-failure", "busybox")
+
+	id = strings.TrimSpace(string(out))
+	name = inspectField(c, id, "HostConfig.RestartPolicy.Name")
+	maxRetry = inspectField(c, id, "HostConfig.RestartPolicy.MaximumRetryCount")
+
+	c.Assert(name, checker.Equals, "on-failure")
+	c.Assert(maxRetry, checker.Equals, "0")
 }
 
 // a good container with --restart=on-failure:3
@@ -235,10 +259,19 @@ func (s *DockerSuite) TestRestartContainerwithRestartPolicy(c *check.C) {
 	dockerCmd(c, "restart", id1)
 	dockerCmd(c, "restart", id2)
 
+	// Make sure we can stop/start (regression test from a705e166cf3bcca62543150c2b3f9bfeae45ecfa)
 	dockerCmd(c, "stop", id1)
 	dockerCmd(c, "stop", id2)
 	dockerCmd(c, "start", id1)
 	dockerCmd(c, "start", id2)
+
+	// Kill the containers, making sure the are stopped at the end of the test
+	dockerCmd(c, "kill", id1)
+	dockerCmd(c, "kill", id2)
+	err = waitInspect(id1, "{{ .State.Restarting }} {{ .State.Running }}", "false false", waitTimeout)
+	c.Assert(err, checker.IsNil)
+	err = waitInspect(id2, "{{ .State.Restarting }} {{ .State.Running }}", "false false", waitTimeout)
+	c.Assert(err, checker.IsNil)
 }
 
 func (s *DockerSuite) TestRestartAutoRemoveContainer(c *check.C) {
@@ -251,4 +284,7 @@ func (s *DockerSuite) TestRestartAutoRemoveContainer(c *check.C) {
 
 	out, _ = dockerCmd(c, "ps")
 	c.Assert(out, checker.Contains, id[:12], check.Commentf("container should be restarted instead of removed: %v", out))
+
+	// Kill the container to make sure it will be removed
+	dockerCmd(c, "kill", id)
 }

@@ -22,17 +22,8 @@ var (
 	// path to containerd's ctr binary
 	ctrBinary = "docker-containerd-ctr"
 
-	// the private registry image to use for tests involving the registry
-	registryImageName = "registry"
-
 	// the private registry to use for tests
 	privateRegistryURL = "127.0.0.1:5000"
-
-	// TODO Windows CI. These are incorrect and need fixing into
-	// platform specific pieces.
-	runtimePath = "/var/run/docker"
-
-	workingDirectory string
 
 	// isLocalDaemon is true if the daemon under test is on the same
 	// host as the CLI.
@@ -49,10 +40,6 @@ var (
 	// the platform supports it. For example, Windows Server 2016 TP3 did
 	// not support volumes, but TP4 did.
 	windowsDaemonKV int
-
-	// daemonDefaultImage is the name of the default image to use when running
-	// tests. This is platform dependent.
-	daemonDefaultImage string
 
 	// For a local daemon on Linux, these values will be used for testing
 	// user namespace support as the standard graph path(s) will be
@@ -79,12 +66,8 @@ var (
 
 	// daemonPid is the pid of the main test daemon
 	daemonPid int
-)
 
-const (
-	// DefaultImage is the name of the base image for the majority of tests that
-	// are run across suites
-	DefaultImage = "busybox"
+	daemonKernelVersion string
 )
 
 func init() {
@@ -98,13 +81,9 @@ func init() {
 		fmt.Printf("ERROR: couldn't resolve full path to the Docker binary (%v)\n", err)
 		os.Exit(1)
 	}
-	if registryImage := os.Getenv("REGISTRY_IMAGE"); registryImage != "" {
-		registryImageName = registryImage
-	}
 	if registry := os.Getenv("REGISTRY_URL"); registry != "" {
 		privateRegistryURL = registry
 	}
-	workingDirectory, _ = os.Getwd()
 
 	// Deterministically working out the environment in which CI is running
 	// to evaluate whether the daemon is local or remote is not possible through
@@ -134,6 +113,7 @@ func init() {
 	type Info struct {
 		DockerRootDir     string
 		ExperimentalBuild bool
+		KernelVersion     string
 	}
 	var i Info
 	status, b, err := sockRequest("GET", "/info", nil)
@@ -141,6 +121,7 @@ func init() {
 		if err = json.Unmarshal(b, &i); err == nil {
 			dockerBasePath = i.DockerRootDir
 			experimentalDaemon = i.ExperimentalBuild
+			daemonKernelVersion = i.KernelVersion
 		}
 	}
 	volumesConfigPath = dockerBasePath + "/volumes"

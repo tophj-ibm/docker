@@ -149,6 +149,15 @@ func (daemon *Daemon) restore() error {
 				continue
 			}
 			container.RWLayer = rwlayer
+			if err := daemon.Mount(container); err != nil {
+				// The mount is unlikely to fail. However, in case mount fails
+				// the container should be allowed to restore here. Some functionalities
+				// (like docker exec -u user) might be missing but container is able to be
+				// stopped/restarted/removed.
+				// See #29365 for related information.
+				// The error is only logged here.
+				logrus.Warnf("Failed to mount container %v: %v", id, err)
+			}
 			logrus.Debugf("Loaded container %v", container.ID)
 
 			containers[container.ID] = container
@@ -333,7 +342,7 @@ func (daemon *Daemon) restore() error {
 		// if the container has restart policy, do not
 		// prepare the mountpoints since it has been done on restarting.
 		// This is to speed up the daemon start when a restart container
-		// has a volume and the volume dirver is not available.
+		// has a volume and the volume driver is not available.
 		if _, ok := restartContainers[c]; ok {
 			continue
 		} else if _, ok := removeContainers[c.ID]; ok {
@@ -524,7 +533,10 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 		logrus.Warnf("Failed to configure golang's threads limit: %v", err)
 	}
 
-	installDefaultAppArmorProfile()
+	if err := ensureDefaultAppArmorProfile(); err != nil {
+		logrus.Errorf(err.Error())
+	}
+
 	daemonRepo := filepath.Join(config.Root, "containers")
 	if err := idtools.MkdirAllAs(daemonRepo, 0700, rootUID, rootGID); err != nil && !os.IsExist(err) {
 		return nil, err
@@ -785,6 +797,12 @@ func (daemon *Daemon) Shutdown() error {
 			}
 			logrus.Debugf("container stopped %s", c.ID)
 		})
+	}
+
+	if daemon.volumes != nil {
+		if err := daemon.volumes.Shutdown(); err != nil {
+			logrus.Errorf("Error shutting down volume store: %v", err)
+		}
 	}
 
 	if daemon.layerStore != nil {
@@ -1186,6 +1204,7 @@ func (daemon *Daemon) networkOptions(dconfig *Config, pg plugingetter.PluginGett
 		return options, nil
 	}
 
+	options = append(options, nwconfig.OptionExperimental(dconfig.Experimental))
 	options = append(options, nwconfig.OptionDataDir(dconfig.Root))
 	options = append(options, nwconfig.OptionExecRoot(dconfig.GetExecRoot()))
 

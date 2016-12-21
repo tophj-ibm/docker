@@ -4,8 +4,8 @@ set -e
 # usage: ./generate.sh [versions]
 #    ie: ./generate.sh
 #        to update all Dockerfiles in this directory
-#    or: ./generate.sh
-#        to only update fedora-23/Dockerfile
+#    or: ./generate.sh centos-7
+#        to only update centos-7/Dockerfile
 #    or: ./generate.sh fedora-newversion
 #        to create a new folder and a Dockerfile within it
 
@@ -52,6 +52,9 @@ for version in "${versions[@]}"; do
 			echo "RUN yum install -y yum-utils && curl -o /etc/yum.repos.d/public-yum-ol6.repo http://yum.oracle.com/public-yum-ol6.repo && yum-config-manager -q --enable ol6_UEKR4"  >> "$version/Dockerfile"
 			echo "RUN yum install -y kernel-uek-devel-4.1.12-32.el6uek"  >> "$version/Dockerfile"
 			echo >> "$version/Dockerfile"
+			;;
+		fedora:*)
+			echo "RUN ${installer} -y upgrade" >> "$version/Dockerfile"
 			;;
 		*) ;;
 	esac

@@ -188,7 +188,7 @@ func New(cfgOptions ...config.Option) (NetworkController, error) {
 		return nil, err
 	}
 
-	for _, i := range getInitializers() {
+	for _, i := range getInitializers(c.cfg.Daemon.Experimental) {
 		var dcfg map[string]interface{}
 
 		// External plugins don't need config passed through daemon. They can
@@ -312,7 +312,7 @@ func (c *controller) clusterAgentInit() {
 				c.clusterConfigAvailable = true
 				keys := c.keys
 				c.Unlock()
-				// agent initialization needs encyrption keys and bind/remote IP which
+				// agent initialization needs encryption keys and bind/remote IP which
 				// comes from the daemon cluster events
 				if len(keys) > 0 {
 					c.agentSetup()
@@ -476,7 +476,7 @@ func (c *controller) ID() string {
 
 func (c *controller) BuiltinDrivers() []string {
 	drivers := []string{}
-	for _, i := range getInitializers() {
+	for _, i := range getInitializers(c.cfg.Daemon.Experimental) {
 		if i.ntype == "remote" {
 			continue
 		}
@@ -786,7 +786,7 @@ func (c *controller) reservePools() {
 		}
 		for _, ep := range epl {
 			if err := ep.assignAddress(ipam, true, ep.Iface().AddressIPv6() != nil); err != nil {
-				logrus.Warnf("Failed to reserve current adress for endpoint %q (%s) on network %q (%s)",
+				logrus.Warnf("Failed to reserve current address for endpoint %q (%s) on network %q (%s)",
 					ep.Name(), ep.ID(), n.Name(), n.ID())
 			}
 		}
