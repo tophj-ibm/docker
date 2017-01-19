@@ -237,7 +237,7 @@ drivers: `aufs`, `devicemapper`, `btrfs`, `zfs`, `overlay` and `overlay2`.
 
 The `aufs` driver is the oldest, but is based on a Linux kernel patch-set that
 is unlikely to be merged into the main kernel. These are also known to cause
-some serious kernel crashes. However, `aufs` allows containers to share
+some serious kernel crashes. However `aufs` allows containers to share
 executable and shared library memory, so is a useful choice when running
 thousands of containers with the same program or libraries.
 
@@ -658,7 +658,7 @@ options for `zfs` start with `zfs` and options for `btrfs` start with `btrfs`.
 
     Overrides the Linux kernel version check allowing overlay2. Support for
     specifying multiple lower directories needed by overlay2 was added to the
-    Linux kernel in 4.0.0. However some older kernel versions may be patched
+    Linux kernel in 4.0.0. However, some older kernel versions may be patched
     to add multiple lower directory support for OverlayFS. This option should
     only be used after verifying this support exists in the kernel. Applying
     this option on a kernel without this support will cause failures on mount.
@@ -684,16 +684,18 @@ configuration file or using the `--add-runtime` command line argument.
 The following is an example adding 2 runtimes via the configuration:
 
 ```json
-"default-runtime": "runc",
-"runtimes": {
-	"runc": {
-		"path": "runc"
-	},
-	"custom": {
-		"path": "/usr/local/bin/my-runc-replacement",
-		"runtimeArgs": [
-			"--debug"
-		]
+{
+	"default-runtime": "runc",
+	"runtimes": {
+		"runc": {
+			"path": "runc"
+		},
+		"custom": {
+			"path": "/usr/local/bin/my-runc-replacement",
+			"runtimeArgs": [
+				"--debug"
+			]
+		}
 	}
 }
 ```
@@ -713,7 +715,7 @@ with the `--exec-opt` flag. All the flag's options have the `native` prefix. A
 single `native.cgroupdriver` option is available.
 
 The `native.cgroupdriver` option specifies the management of the container's
-cgroups. You can specify only specify `cgroupfs` or `systemd`. If you specify
+cgroups. You can only specify `cgroupfs` or `systemd`. If you specify
 `systemd` and it is not available, the system errors out. If you omit the
 `native.cgroupdriver` option,` cgroupfs` is used.
 
@@ -728,8 +730,8 @@ Setting this option applies to all containers the daemon launches.
 Also Windows Container makes use of `--exec-opt` for special purpose. Docker user
 can specify default container isolation technology with this, for example:
 
-```bash
-$ sudo dockerd --exec-opt isolation=hyperv
+```console
+> dockerd --exec-opt isolation=hyperv
 ```
 
 Will make `hyperv` the default isolation technology on Windows. If no isolation
@@ -744,13 +746,11 @@ To set the DNS server for all Docker containers, use:
 $ sudo dockerd --dns 8.8.8.8
 ```
 
-
 To set the DNS search domain for all Docker containers, use:
 
 ```bash
 $ sudo dockerd --dns-search example.com
 ```
-
 
 ## Insecure registries
 
@@ -1287,6 +1287,7 @@ The list of currently supported options that can be reconfigured is this:
   be used to run containers
 - `authorization-plugin`: specifies the authorization plugins to use.
 - `insecure-registries`: it replaces the daemon insecure registries with a new set of insecure registries. If some existing insecure registries in daemon's configuration are not in newly reloaded insecure resgitries, these existing ones will be removed from daemon's config.
+- `registry-mirrors`: it replaces the daemon registry mirrors with a new set of registry mirrors. If some existing registry mirrors in daemon's configuration are not in newly reloaded registry mirrors, these existing ones will be removed from daemon's config.
 
 Updating and reloading the cluster configurations such as `--cluster-store`,
 `--cluster-advertise` and `--cluster-store-opts` will take effect only if

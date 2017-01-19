@@ -18,9 +18,7 @@ func (daemon *Daemon) createSpec(c *container.Container) (*specs.Spec, error) {
 		return nil, err
 	}
 
-	// TODO Windows - this can be removed. Not used (UID/GID)
-	rootUID, rootGID := daemon.GetRemappedUIDGID()
-	if err := c.SetupWorkingDirectory(rootUID, rootGID); err != nil {
+	if err := c.SetupWorkingDirectory(0, 0); err != nil {
 		return nil, err
 	}
 
@@ -66,7 +64,7 @@ func (daemon *Daemon) createSpec(c *container.Container) (*specs.Spec, error) {
 	s.Process.User.Username = c.Config.User
 
 	// In spec.Root. This is not set for Hyper-V containers
-	isHyperV := false
+	var isHyperV bool
 	if c.HostConfig.Isolation.IsDefault() {
 		// Container using default isolation, so take the default from the daemon configuration
 		isHyperV = daemon.defaultIsolation.IsHyperV()

@@ -20,7 +20,7 @@ const (
 	digestHeader     = "DIGEST"
 )
 
-// ImageContext contains image specific information required by the formater, encapsulate a Context struct.
+// ImageContext contains image specific information required by the formatter, encapsulate a Context struct.
 type ImageContext struct {
 	Context
 	Digest bool
@@ -226,8 +226,7 @@ func (c *imageContext) CreatedAt() string {
 
 func (c *imageContext) Size() string {
 	c.AddHeader(sizeHeader)
-	//NOTE: For backward compatibility we need to return VirtualSize
-	return units.HumanSizeWithPrecision(float64(c.i.VirtualSize), 3)
+	return units.HumanSizeWithPrecision(float64(c.i.Size), 3)
 }
 
 func (c *imageContext) Containers() string {
@@ -253,8 +252,8 @@ func (c *imageContext) SharedSize() string {
 
 func (c *imageContext) UniqueSize() string {
 	c.AddHeader(uniqueSizeHeader)
-	if c.i.Size == -1 {
+	if c.i.VirtualSize == -1 || c.i.SharedSize == -1 {
 		return "N/A"
 	}
-	return units.HumanSize(float64(c.i.Size))
+	return units.HumanSize(float64(c.i.VirtualSize - c.i.SharedSize))
 }

@@ -16,9 +16,9 @@ keywords: "plugin, create"
 # plugin create
 
 ```markdown
-Usage:  docker plugin create [OPTIONS] PLUGIN[:tag] PATH-TO-ROOTFS(rootfs + config.json)
+Usage:  docker plugin create [OPTIONS] PLUGIN PLUGIN-DATA-DIR
 
-Create a plugin from a rootfs and configuration
+Create a plugin from a rootfs and configuration. Plugin data directory must contain config.json and rootfs directory.
 
 Options:
       --compress   Compress the context using gzip 
@@ -41,8 +41,9 @@ $ ls -ls /home/pluginDir
 $ docker plugin create plugin /home/pluginDir
 plugin
 
-NAME                  	TAG                 DESCRIPTION                  ENABLED
-plugin                  latest              A sample plugin for Docker   true
+$ docker plugin ls
+ID                  NAME                TAG                 DESCRIPTION                  ENABLED
+672d8144ec02        plugin              latest              A sample plugin for Docker   false
 ```
 
 The plugin can subsequently be enabled for local use or pushed to the public registry.

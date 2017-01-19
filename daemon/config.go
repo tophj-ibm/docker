@@ -229,7 +229,7 @@ func parseClusterAdvertiseSettings(clusterStore, clusterAdvertise string) (strin
 		return "", errDiscoveryDisabled
 	}
 	if clusterStore == "" {
-		return "", fmt.Errorf("invalid cluster configuration. --cluster-advertise must be accompanied by --cluster-store configuration")
+		return "", errors.New("invalid cluster configuration. --cluster-advertise must be accompanied by --cluster-store configuration")
 	}
 
 	advertise, err := discovery.ParseAdvertise(clusterAdvertise)
@@ -239,7 +239,7 @@ func parseClusterAdvertiseSettings(clusterStore, clusterAdvertise string) (strin
 	return advertise, nil
 }
 
-// GetConflictFreeLabels validate Labels for conflict
+// GetConflictFreeLabels validates Labels for conflict
 // In swarm the duplicates for labels are removed
 // so we only take same values here, no conflict values
 // If the key-value is the same we will only take the last label

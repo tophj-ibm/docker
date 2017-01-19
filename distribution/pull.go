@@ -1,15 +1,16 @@
 package distribution
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/distribution/digest"
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/distribution/metadata"
 	"github.com/docker/docker/pkg/progress"
 	"github.com/docker/docker/reference"
 	"github.com/docker/docker/registry"
+	"github.com/opencontainers/go-digest"
 	"golang.org/x/net/context"
 )
 
@@ -172,7 +173,7 @@ func writeStatus(requestedTag string, out progress.Output, layersDownloaded bool
 // ValidateRepoName validates the name of a repository.
 func ValidateRepoName(name string) error {
 	if name == "" {
-		return fmt.Errorf("Repository name can't be empty")
+		return errors.New("Repository name can't be empty")
 	}
 	if name == api.NoBaseImageSpecifier {
 		return fmt.Errorf("'%s' is a reserved name", api.NoBaseImageSpecifier)

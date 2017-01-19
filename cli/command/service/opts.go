@@ -1,10 +1,7 @@
 package service
 
 import (
-	"encoding/csv"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -142,98 +139,6 @@ func (f *floatValue) Value() float32 {
 	return float32(*f)
 }
 
-// SecretRequestSpec is a type for requesting secrets
-type SecretRequestSpec struct {
-	source string
-	target string
-	uid    string
-	gid    string
-	mode   os.FileMode
-}
-
-// SecretOpt is a Value type for parsing secrets
-type SecretOpt struct {
-	values []*SecretRequestSpec
-}
-
-// Set a new secret value
-func (o *SecretOpt) Set(value string) error {
-	csvReader := csv.NewReader(strings.NewReader(value))
-	fields, err := csvReader.Read()
-	if err != nil {
-		return err
-	}
-
-	spec := &SecretRequestSpec{
-		source: "",
-		target: "",
-		uid:    "0",
-		gid:    "0",
-		mode:   0444,
-	}
-
-	for _, field := range fields {
-		parts := strings.SplitN(field, "=", 2)
-		key := strings.ToLower(parts[0])
-
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid field '%s' must be a key=value pair", field)
-		}
-
-		value := parts[1]
-		switch key {
-		case "source", "src":
-			spec.source = value
-		case "target":
-			tDir, _ := filepath.Split(value)
-			if tDir != "" {
-				return fmt.Errorf("target must not have a path")
-			}
-			spec.target = value
-		case "uid":
-			spec.uid = value
-		case "gid":
-			spec.gid = value
-		case "mode":
-			m, err := strconv.ParseUint(value, 0, 32)
-			if err != nil {
-				return fmt.Errorf("invalid mode specified: %v", err)
-			}
-
-			spec.mode = os.FileMode(m)
-		default:
-			return fmt.Errorf("invalid field in secret request: %s", key)
-		}
-	}
-
-	if spec.source == "" {
-		return fmt.Errorf("source is required")
-	}
-
-	o.values = append(o.values, spec)
-	return nil
-}
-
-// Type returns the type of this option
-func (o *SecretOpt) Type() string {
-	return "secret"
-}
-
-// String returns a string repr of this option
-func (o *SecretOpt) String() string {
-	secrets := []string{}
-	for _, secret := range o.values {
-		repr := fmt.Sprintf("%s -> %s", secret.source, secret.target)
-		secrets = append(secrets, repr)
-	}
-	return strings.Join(secrets, ", ")
-}
-
-// Value returns the secret requests
-func (o *SecretOpt) Value() []*SecretRequestSpec {
-	return o.values
-}
-
 type updateOptions struct {
 	parallelism     uint64
 	delay           time.Duration
@@ -304,7 +209,7 @@ type logDriverOptions struct {
 }
 
 func newLogDriverOptions() logDriverOptions {
-	return logDriverOptions{opts: opts.NewListOpts(runconfigopts.ValidateEnv)}
+	return logDriverOptions{opts: opts.NewListOpts(opts.ValidateEnv)}
 }
 
 func (ldo *logDriverOptions) toLogDriver() *swarm.Driver {
@@ -426,17 +331,17 @@ type serviceOptions struct {
 
 func newServiceOptions() *serviceOptions {
 	return &serviceOptions{
-		labels:          opts.NewListOpts(runconfigopts.ValidateEnv),
+		labels:          opts.NewListOpts(opts.ValidateEnv),
 		constraints:     opts.NewListOpts(nil),
-		containerLabels: opts.NewListOpts(runconfigopts.ValidateEnv),
-		env:             opts.NewListOpts(runconfigopts.ValidateEnv),
+		containerLabels: opts.NewListOpts(opts.ValidateEnv),
+		env:             opts.NewListOpts(opts.ValidateEnv),
 		envFile:         opts.NewListOpts(nil),
 		groups:          opts.NewListOpts(nil),
 		logDriver:       newLogDriverOptions(),
 		dns:             opts.NewListOpts(opts.ValidateIPAddress),
 		dnsOption:       opts.NewListOpts(nil),
 		dnsSearch:       opts.NewListOpts(opts.ValidateDNSSearch),
-		hosts:           opts.NewListOpts(runconfigopts.ValidateExtraHost),
+		hosts:           opts.NewListOpts(opts.ValidateExtraHost),
 		networks:        opts.NewListOpts(nil),
 	}
 }

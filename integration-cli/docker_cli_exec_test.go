@@ -15,8 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/pkg/integration/checker"
-	icmd "github.com/docker/docker/pkg/integration/cmd"
+	"github.com/docker/docker/integration-cli/checker"
+	"github.com/docker/docker/integration-cli/request"
+	icmd "github.com/docker/docker/pkg/testutil/cmd"
 	"github.com/go-check/check"
 )
 
@@ -142,7 +143,7 @@ func (s *DockerSuite) TestExecPausedContainer(c *check.C) {
 
 	dockerCmd(c, "pause", "testing")
 	out, _, err := dockerCmdWithError("exec", "-i", "-t", ContainerID, "echo", "hello")
-	c.Assert(err, checker.NotNil, check.Commentf("container should fail to exec new conmmand if it is paused"))
+	c.Assert(err, checker.NotNil, check.Commentf("container should fail to exec new command if it is paused"))
 
 	expected := ContainerID + " is paused, unpause the container before exec"
 	c.Assert(out, checker.Contains, expected, check.Commentf("container should not exec new command if it is paused"))
@@ -206,6 +207,7 @@ func (s *DockerSuite) TestExecTTYWithoutStdin(c *check.C) {
 	}
 }
 
+// FIXME(vdemeester) this should be a unit tests on cli/command/container package
 func (s *DockerSuite) TestExecParseError(c *check.C) {
 	// TODO Windows CI: Requires some extra work. Consider copying the
 	// runSleepingContainer helper to have an exec version.
@@ -213,10 +215,11 @@ func (s *DockerSuite) TestExecParseError(c *check.C) {
 	dockerCmd(c, "run", "-d", "--name", "top", "busybox", "top")
 
 	// Test normal (non-detached) case first
-	cmd := exec.Command(dockerBinary, "exec", "top")
-	_, stderr, _, err := runCommandWithStdoutStderr(cmd)
-	c.Assert(err, checker.NotNil)
-	c.Assert(stderr, checker.Contains, "See 'docker exec --help'")
+	icmd.RunCommand(dockerBinary, "exec", "top").Assert(c, icmd.Expected{
+		ExitCode: 1,
+		Error:    "exit status 1",
+		Err:      "See 'docker exec --help'",
+	})
 }
 
 func (s *DockerSuite) TestExecStopNotHanging(c *check.C) {
@@ -353,14 +356,14 @@ func (s *DockerSuite) TestExecInspectID(c *check.C) {
 	}
 
 	// But we should still be able to query the execID
-	sc, body, err := sockRequest("GET", "/exec/"+execID+"/json", nil)
+	sc, body, err := request.SockRequest("GET", "/exec/"+execID+"/json", nil, daemonHost())
 	c.Assert(sc, checker.Equals, http.StatusOK, check.Commentf("received status != 200 OK: %d\n%s", sc, body))
 
 	// Now delete the container and then an 'inspect' on the exec should
 	// result in a 404 (not 'container not running')
 	out, ec := dockerCmd(c, "rm", "-f", id)
 	c.Assert(ec, checker.Equals, 0, check.Commentf("error removing container: %s", out))
-	sc, body, err = sockRequest("GET", "/exec/"+execID+"/json", nil)
+	sc, body, err = request.SockRequest("GET", "/exec/"+execID+"/json", nil, daemonHost())
 	c.Assert(sc, checker.Equals, http.StatusNotFound, check.Commentf("received status != 404: %d\n%s", sc, body))
 }
 
@@ -470,13 +473,9 @@ func (s *DockerSuite) TestExecWithImageUser(c *check.C) {
 	// Not applicable on Windows
 	testRequires(c, DaemonIsLinux)
 	name := "testbuilduser"
-	_, err := buildImage(name,
-		`FROM busybox
+	buildImageSuccessfully(c, name, withDockerfile(`FROM busybox
 		RUN echo 'dockerio:x:1001:1001::/bin:/bin/false' >> /etc/passwd
-		USER dockerio`,
-		true)
-	c.Assert(err, checker.IsNil)
-
+		USER dockerio`))
 	dockerCmd(c, "run", "-d", "--name", "dockerioexec", name, "top")
 
 	out, _ := dockerCmd(c, "exec", "dockerioexec", "whoami")

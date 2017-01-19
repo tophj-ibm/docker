@@ -8,7 +8,6 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net"
 	"os"
@@ -17,7 +16,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Sirupsen/logrus"
@@ -28,6 +26,7 @@ import (
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/daemon/events"
 	"github.com/docker/docker/daemon/exec"
+	"github.com/docker/docker/daemon/initlayer"
 	"github.com/docker/docker/dockerversion"
 	"github.com/docker/docker/plugin"
 	"github.com/docker/libnetwork/cluster"
@@ -42,14 +41,11 @@ import (
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/docker/docker/pkg/plugingetter"
-	"github.com/docker/docker/pkg/progress"
 	"github.com/docker/docker/pkg/registrar"
 	"github.com/docker/docker/pkg/signal"
-	"github.com/docker/docker/pkg/streamformatter"
 	"github.com/docker/docker/pkg/sysinfo"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/pkg/truncindex"
-	pluginstore "github.com/docker/docker/plugin/store"
 	"github.com/docker/docker/reference"
 	"github.com/docker/docker/registry"
 	"github.com/docker/docker/runconfig"
@@ -59,6 +55,7 @@ import (
 	"github.com/docker/libnetwork"
 	nwconfig "github.com/docker/libnetwork/config"
 	"github.com/docker/libtrust"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -69,7 +66,7 @@ var (
 	// DefaultInitBinary is the name of the default init binary
 	DefaultInitBinary = "docker-init"
 
-	errSystemNotSupported = fmt.Errorf("The Docker daemon is not supported on this platform.")
+	errSystemNotSupported = errors.New("The Docker daemon is not supported on this platform.")
 )
 
 // Daemon holds information about the Docker daemon.
@@ -99,7 +96,8 @@ type Daemon struct {
 	gidMaps                   []idtools.IDMap
 	layerStore                layer.Store
 	imageStore                image.Store
-	PluginStore               *pluginstore.Store
+	PluginStore               *plugin.Store // todo: remove
+	pluginManager             *plugin.Manager
 	nameIndex                 *registrar.Registrar
 	linkIndex                 *linkIndex
 	containerd                libcontainerd.Client
@@ -149,15 +147,6 @@ func (daemon *Daemon) restore() error {
 				continue
 			}
 			container.RWLayer = rwlayer
-			if err := daemon.Mount(container); err != nil {
-				// The mount is unlikely to fail. However, in case mount fails
-				// the container should be allowed to restore here. Some functionalities
-				// (like docker exec -u user) might be missing but container is able to be
-				// stopped/restarted/removed.
-				// See #29365 for related information.
-				// The error is only logged here.
-				logrus.Warnf("Failed to mount container %v: %v", id, err)
-			}
 			logrus.Debugf("Loaded container %v", container.ID)
 
 			containers[container.ID] = container
@@ -198,7 +187,6 @@ func (daemon *Daemon) restore() error {
 		}
 	}
 
-	var migrateLegacyLinks bool // Not relevant on Windows
 	var wg sync.WaitGroup
 	var mapLock sync.Mutex
 	for _, c := range containers {
@@ -215,6 +203,23 @@ func (daemon *Daemon) restore() error {
 					logrus.Errorf("Failed to restore %s with containerd: %s", c.ID, err)
 					return
 				}
+
+				// we call Mount and then Unmount to get BaseFs of the container
+				if err := daemon.Mount(c); err != nil {
+					// The mount is unlikely to fail. However, in case mount fails
+					// the container should be allowed to restore here. Some functionalities
+					// (like docker exec -u user) might be missing but container is able to be
+					// stopped/restarted/removed.
+					// See #29365 for related information.
+					// The error is only logged here.
+					logrus.Warnf("Failed to mount container on getting BaseFs path %v: %v", c.ID, err)
+				} else {
+					// if mount success, then unmount it
+					if err := daemon.Unmount(c); err != nil {
+						logrus.Warnf("Failed to umount container on getting BaseFs path %v: %v", c.ID, err)
+					}
+				}
+
 				c.ResetRestartManager(false)
 				if !c.HostConfig.NetworkMode.IsContainer() && c.IsRunning() {
 					options, err := daemon.buildSandboxOptions(c)
@@ -261,24 +266,12 @@ func (daemon *Daemon) restore() error {
 				c.SetDead()
 				c.ToDisk()
 			}
-
-			// if c.hostConfig.Links is nil (not just empty), then it is using the old sqlite links and needs to be migrated
-			if c.HostConfig != nil && c.HostConfig.Links == nil {
-				migrateLegacyLinks = true
-			}
 		}(c)
 	}
 	wg.Wait()
 	daemon.netController, err = daemon.initNetworkController(daemon.configStore, activeSandboxes)
 	if err != nil {
 		return fmt.Errorf("Error initializing network controller: %v", err)
-	}
-
-	// Perform migration of legacy sqlite links (no-op on Windows)
-	if migrateLegacyLinks {
-		if err := daemon.sqliteMigration(containers); err != nil {
-			return err
-		}
 	}
 
 	// Now that all the containers are registered, register the links
@@ -554,10 +547,19 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 	}
 
 	d.RegistryService = registryService
-	d.PluginStore = pluginstore.NewStore(config.Root)
+	d.PluginStore = plugin.NewStore(config.Root) // todo: remove
 	// Plugin system initialization should happen before restore. Do not change order.
-	if err := d.pluginInit(config, containerdRemote); err != nil {
-		return nil, err
+	d.pluginManager, err = plugin.NewManager(plugin.ManagerConfig{
+		Root:               filepath.Join(config.Root, "plugins"),
+		ExecRoot:           "/run/docker/plugins", // possibly needs fixing
+		Store:              d.PluginStore,
+		Executor:           containerdRemote,
+		RegistryService:    registryService,
+		LiveRestoreEnabled: config.LiveRestoreEnabled,
+		LogPluginEvent:     d.LogPluginEvent, // todo: make private
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "couldn't create plugin manager")
 	}
 
 	d.layerStore, err = layer.NewStoreFromOptions(layer.StoreOptions{
@@ -568,6 +570,7 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 		UIDMaps:                   uidMaps,
 		GIDMaps:                   gidMaps,
 		PluginGetter:              d.PluginStore,
+		ExperimentalEnabled:       config.Experimental,
 	})
 	if err != nil {
 		return nil, err
@@ -632,7 +635,7 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 	logrus.Infof("Graph migration to content-addressability took %.2f seconds", time.Since(migrationStart).Seconds())
 
 	// Discovery is only enabled when the daemon is launched with an address to advertise.  When
-	// initialized, the daemon is registered and we can store the discovery backend as its read-only
+	// initialized, the daemon is registered and we can store the discovery backend as it's read-only
 	if err := d.initDiscovery(config); err != nil {
 		return nil, err
 	}
@@ -641,7 +644,7 @@ func NewDaemon(config *Config, registryService registry.Service, containerdRemot
 	// Check if Devices cgroup is mounted, it is hard requirement for container security,
 	// on Linux.
 	if runtime.GOOS == "linux" && !sysInfo.CgroupDevicesEnabled {
-		return nil, fmt.Errorf("Devices cgroup isn't mounted")
+		return nil, errors.New("Devices cgroup isn't mounted")
 	}
 
 	d.ID = trustKey.PublicKey().KeyID()
@@ -714,7 +717,7 @@ func (daemon *Daemon) shutdownContainer(c *container.Container) error {
 		logrus.Debugf("Found container %s is paused, sending SIGTERM before unpausing it", c.ID)
 		sig, ok := signal.SignalMap["TERM"]
 		if !ok {
-			return fmt.Errorf("System does not support SIGTERM")
+			return errors.New("System does not support SIGTERM")
 		}
 		if err := daemon.kill(c, int(sig)); err != nil {
 			return fmt.Errorf("sending SIGTERM to container %s with error: %v", c.ID, err)
@@ -726,7 +729,7 @@ func (daemon *Daemon) shutdownContainer(c *container.Container) error {
 			logrus.Debugf("container %s failed to exit in %d second of SIGTERM, sending SIGKILL to force", c.ID, stopTimeout)
 			sig, ok := signal.SignalMap["KILL"]
 			if !ok {
-				return fmt.Errorf("System does not support SIGKILL")
+				return errors.New("System does not support SIGKILL")
 			}
 			if err := daemon.kill(c, int(sig)); err != nil {
 				logrus.Errorf("Failed to SIGKILL container %s", c.ID)
@@ -895,36 +898,6 @@ func (daemon *Daemon) V6Subnets() []net.IPNet {
 	return subnets
 }
 
-func writeDistributionProgress(cancelFunc func(), outStream io.Writer, progressChan <-chan progress.Progress) {
-	progressOutput := streamformatter.NewJSONStreamFormatter().NewProgressOutput(outStream, false)
-	operationCancelled := false
-
-	for prog := range progressChan {
-		if err := progressOutput.WriteProgress(prog); err != nil && !operationCancelled {
-			// don't log broken pipe errors as this is the normal case when a client aborts
-			if isBrokenPipe(err) {
-				logrus.Info("Pull session cancelled")
-			} else {
-				logrus.Errorf("error writing progress to client: %v", err)
-			}
-			cancelFunc()
-			operationCancelled = true
-			// Don't return, because we need to continue draining
-			// progressChan until it's closed to avoid a deadlock.
-		}
-	}
-}
-
-func isBrokenPipe(e error) bool {
-	if netErr, ok := e.(*net.OpError); ok {
-		e = netErr.Err
-		if sysErr, ok := netErr.Err.(*os.SyscallError); ok {
-			e = sysErr.Err
-		}
-	}
-	return e == syscall.EPIPE
-}
-
 // GraphDriverName returns the name of the graph driver used by the layer.Store
 func (daemon *Daemon) GraphDriverName() string {
 	return daemon.layerStore.DriverName()
@@ -956,7 +929,7 @@ func tempDir(rootDir string, rootUID, rootGID int) (string, error) {
 
 func (daemon *Daemon) setupInitLayer(initPath string) error {
 	rootUID, rootGID := daemon.GetRemappedUIDGID()
-	return setupInitLayer(initPath, rootUID, rootGID)
+	return initlayer.Setup(initPath, rootUID, rootGID)
 }
 
 func setDefaultMtu(config *Config) {
@@ -976,7 +949,7 @@ func (daemon *Daemon) configureVolumes(rootUID, rootGID int) (*store.VolumeStore
 	volumedrivers.RegisterPluginGetter(daemon.PluginStore)
 
 	if !volumedrivers.Register(volumesDriver, volumesDriver.Name()) {
-		return nil, fmt.Errorf("local volume driver could not be registered")
+		return nil, errors.New("local volume driver could not be registered")
 	}
 	return store.New(daemon.configStore.Root)
 }
@@ -1009,14 +982,15 @@ func (daemon *Daemon) initDiscovery(config *Config) error {
 // Reload reads configuration changes and modifies the
 // daemon according to those changes.
 // These are the settings that Reload changes:
-// - Daemon labels.
-// - Daemon debug log level.
-// - Daemon insecure registries.
+// - Daemon labels
+// - Daemon debug log level
+// - Insecure registries
+// - Registry mirrors
 // - Daemon max concurrent downloads
 // - Daemon max concurrent uploads
-// - Cluster discovery (reconfigure and restart).
+// - Cluster discovery (reconfigure and restart)
 // - Daemon live restore
-// - Daemon shutdown timeout (in seconds).
+// - Daemon shutdown timeout (in seconds)
 func (daemon *Daemon) Reload(config *Config) (err error) {
 
 	daemon.configStore.reloadLock.Lock()
@@ -1049,6 +1023,14 @@ func (daemon *Daemon) Reload(config *Config) (err error) {
 			return err
 		}
 	}
+
+	if config.IsValueSet("registry-mirrors") {
+		daemon.configStore.Mirrors = config.Mirrors
+		if err := daemon.RegistryService.LoadMirrors(config.Mirrors); err != nil {
+			return err
+		}
+	}
+
 	if config.IsValueSet("live-restore") {
 		daemon.configStore.LiveRestoreEnabled = config.LiveRestoreEnabled
 		if err := daemon.containerdRemote.UpdateOptions(libcontainerd.WithLiveRestore(config.LiveRestoreEnabled)); err != nil {
@@ -1099,6 +1081,16 @@ func (daemon *Daemon) Reload(config *Config) (err error) {
 		attributes["insecure-registries"] = string(insecureRegistries)
 	} else {
 		attributes["insecure-registries"] = "[]"
+	}
+
+	if daemon.configStore.Mirrors != nil {
+		mirrors, err := json.Marshal(daemon.configStore.Mirrors)
+		if err != nil {
+			return err
+		}
+		attributes["registry-mirrors"] = string(mirrors)
+	} else {
+		attributes["registry-mirrors"] = "[]"
 	}
 
 	attributes["cluster-store"] = daemon.configStore.ClusterStore
@@ -1216,7 +1208,7 @@ func (daemon *Daemon) networkOptions(dconfig *Config, pg plugingetter.PluginGett
 	if strings.TrimSpace(dconfig.ClusterStore) != "" {
 		kv := strings.Split(dconfig.ClusterStore, "://")
 		if len(kv) != 2 {
-			return nil, fmt.Errorf("kv store daemon config must be of the form KV-PROVIDER://KV-URL")
+			return nil, errors.New("kv store daemon config must be of the form KV-PROVIDER://KV-URL")
 		}
 		options = append(options, nwconfig.OptionKVProvider(kv[0]))
 		options = append(options, nwconfig.OptionKVProviderURL(kv[1]))
@@ -1270,17 +1262,18 @@ func (daemon *Daemon) SetCluster(cluster Cluster) {
 	daemon.cluster = cluster
 }
 
-func (daemon *Daemon) pluginInit(cfg *Config, remote libcontainerd.Remote) error {
-	return plugin.Init(cfg.Root, daemon.PluginStore, remote, daemon.RegistryService, cfg.LiveRestoreEnabled, daemon.LogPluginEvent)
-}
-
 func (daemon *Daemon) pluginShutdown() {
-	manager := plugin.GetManager()
+	manager := daemon.pluginManager
 	// Check for a valid manager object. In error conditions, daemon init can fail
 	// and shutdown called, before plugin manager is initialized.
 	if manager != nil {
 		manager.Shutdown()
 	}
+}
+
+// PluginManager returns current pluginManager associated with the daemon
+func (daemon *Daemon) PluginManager() *plugin.Manager { // set up before daemon to avoid this method
+	return daemon.pluginManager
 }
 
 // CreateDaemonRoot creates the root for the daemon

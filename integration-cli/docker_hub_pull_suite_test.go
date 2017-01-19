@@ -5,8 +5,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/docker/docker/integration-cli/checker"
 	"github.com/docker/docker/integration-cli/daemon"
-	"github.com/docker/docker/pkg/integration/checker"
 	"github.com/go-check/check"
 )
 
@@ -41,7 +41,7 @@ func newDockerHubPullSuite() *DockerHubPullSuite {
 func (s *DockerHubPullSuite) SetUpSuite(c *check.C) {
 	testRequires(c, DaemonIsLinux)
 	s.d = daemon.New(c, dockerBinary, dockerdBinary, daemon.Config{
-		Experimental: experimentalDaemon,
+		Experimental: testEnv.ExperimentalDaemon(),
 	})
 	s.d.Start(c)
 }

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	composetypes "github.com/aanand/compose-file/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/swarm"
+	composetypes "github.com/docker/docker/cli/compose/types"
 	"github.com/docker/docker/opts"
 	runconfigopts "github.com/docker/docker/runconfig/opts"
 	"github.com/docker/go-connections/nat"
@@ -263,10 +263,14 @@ func convertUpdateConfig(source *composetypes.UpdateConfig) *swarm.UpdateConfig 
 
 func convertResources(source composetypes.Resources) (*swarm.ResourceRequirements, error) {
 	resources := &swarm.ResourceRequirements{}
+	var err error
 	if source.Limits != nil {
-		cpus, err := opts.ParseCPUs(source.Limits.NanoCPUs)
-		if err != nil {
-			return nil, err
+		var cpus int64
+		if source.Limits.NanoCPUs != "" {
+			cpus, err = opts.ParseCPUs(source.Limits.NanoCPUs)
+			if err != nil {
+				return nil, err
+			}
 		}
 		resources.Limits = &swarm.Resources{
 			NanoCPUs:    cpus,
@@ -274,9 +278,12 @@ func convertResources(source composetypes.Resources) (*swarm.ResourceRequirement
 		}
 	}
 	if source.Reservations != nil {
-		cpus, err := opts.ParseCPUs(source.Reservations.NanoCPUs)
-		if err != nil {
-			return nil, err
+		var cpus int64
+		if source.Reservations.NanoCPUs != "" {
+			cpus, err = opts.ParseCPUs(source.Reservations.NanoCPUs)
+			if err != nil {
+				return nil, err
+			}
 		}
 		resources.Reservations = &swarm.Resources{
 			NanoCPUs:    cpus,
@@ -294,9 +301,11 @@ func convertEndpointSpec(source []string) (*swarm.EndpointSpec, error) {
 	}
 
 	for port := range ports {
-		portConfigs = append(
-			portConfigs,
-			opts.ConvertPortToPortConfig(port, portBindings)...)
+		portConfig, err := opts.ConvertPortToPortConfig(port, portBindings)
+		if err != nil {
+			return nil, err
+		}
+		portConfigs = append(portConfigs, portConfig...)
 	}
 
 	return &swarm.EndpointSpec{Ports: portConfigs}, nil

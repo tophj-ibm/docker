@@ -28,6 +28,7 @@ import (
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/layer"
 	"github.com/docker/docker/libcontainerd"
+	"github.com/docker/docker/opts"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/promise"
@@ -35,7 +36,6 @@ import (
 	"github.com/docker/docker/pkg/symlink"
 	"github.com/docker/docker/restartmanager"
 	"github.com/docker/docker/runconfig"
-	runconfigopts "github.com/docker/docker/runconfig/opts"
 	"github.com/docker/docker/volume"
 	"github.com/docker/go-connections/nat"
 	"github.com/docker/libnetwork"
@@ -328,7 +328,7 @@ func (container *Container) StartLogger() (logger.Logger, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get logging factory: %v", err)
 	}
-	ctx := logger.Context{
+	info := logger.Info{
 		Config:              cfg.Config,
 		ContainerID:         container.ID,
 		ContainerName:       container.Name,
@@ -344,12 +344,12 @@ func (container *Container) StartLogger() (logger.Logger, error) {
 
 	// Set logging file for "json-logger"
 	if cfg.Type == jsonfilelog.Name {
-		ctx.LogPath, err = container.GetRootResourcePath(fmt.Sprintf("%s-json.log", container.ID))
+		info.LogPath, err = container.GetRootResourcePath(fmt.Sprintf("%s-json.log", container.ID))
 		if err != nil {
 			return nil, err
 		}
 	}
-	return c(ctx)
+	return c(info)
 }
 
 // GetProcessLabel returns the process label for the container.
@@ -576,7 +576,7 @@ func (container *Container) AddMountPointWithVolume(destination string, vol volu
 func (container *Container) UnmountVolumes(volumeEventLog func(name, action string, attributes map[string]string)) error {
 	var errors []string
 	for _, volumeMount := range container.MountPoints {
-		// Check if the mounpoint has an ID, this is currently the best way to tell if it's actually mounted
+		// Check if the mountpoint has an ID, this is currently the best way to tell if it's actually mounted
 		// TODO(cpuguyh83): there should be a better way to handle this
 		if volumeMount.Volume != nil && volumeMount.ID != "" {
 			if err := volumeMount.Volume.Unmount(volumeMount.ID); err != nil {
@@ -815,7 +815,7 @@ func (container *Container) BuildJoinOptions(n libnetwork.Network) ([]libnetwork
 	var joinOptions []libnetwork.EndpointOption
 	if epConfig, ok := container.NetworkSettings.Networks[n.Name()]; ok {
 		for _, str := range epConfig.Links {
-			name, alias, err := runconfigopts.ParseLink(str)
+			name, alias, err := opts.ParseLink(str)
 			if err != nil {
 				return nil, err
 			}

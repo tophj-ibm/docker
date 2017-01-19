@@ -12,10 +12,10 @@ import (
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/daemon/network"
 	"github.com/docker/docker/image"
+	"github.com/docker/docker/opts"
 	"github.com/docker/docker/pkg/signal"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/pkg/truncindex"
-	"github.com/docker/docker/runconfig/opts"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -199,12 +199,6 @@ func (daemon *Daemon) setHostConfig(container *container.Container, hostConfig *
 	// Register any links from the host config before starting the container
 	if err := daemon.registerLinks(container, hostConfig); err != nil {
 		return err
-	}
-
-	// make sure links is not nil
-	// this ensures that on the next daemon restart we don't try to migrate from legacy sqlite links
-	if hostConfig.Links == nil {
-		hostConfig.Links = []string{}
 	}
 
 	container.HostConfig = hostConfig

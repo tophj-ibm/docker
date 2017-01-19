@@ -161,7 +161,7 @@ type ImageBuildOptions struct {
 	Dockerfile     string
 	Ulimits        []*units.Ulimit
 	// See the parsing of buildArgs in api/server/router/build/build_routes.go
-	// for an explaination of why BuildArgs needs to use *string instead of
+	// for an explanation of why BuildArgs needs to use *string instead of
 	// just a string
 	BuildArgs   map[string]*string
 	AuthConfigs map[string]AuthConfig
@@ -192,8 +192,8 @@ type ImageCreateOptions struct {
 
 // ImageImportSource holds source information for ImageImport
 type ImageImportSource struct {
-	Source     io.Reader // Source is the data to send to the server to create this image from (mutually exclusive with SourceName)
-	SourceName string    // SourceName is the name of the image to pull (mutually exclusive with Source)
+	Source     io.Reader // Source is the data to send to the server to create this image from. You must set SourceName to "-" to leverage this.
+	SourceName string    // SourceName is the name of the image to pull. Set to "-" to leverage the Source attribute.
 }
 
 // ImageImportOptions holds information to import images from the client host.
@@ -340,11 +340,17 @@ type PluginEnableOptions struct {
 	Timeout int
 }
 
+// PluginDisableOptions holds parameters to disable plugins.
+type PluginDisableOptions struct {
+	Force bool
+}
+
 // PluginInstallOptions holds parameters to install a plugin.
 type PluginInstallOptions struct {
 	Disabled              bool
 	AcceptAllPermissions  bool
 	RegistryAuth          string // RegistryAuth is the base64 encoded credentials for the registry
+	RemoteRef             string // RemoteRef is the plugin name on the registry
 	PrivilegeFunc         RequestPrivilegeFunc
 	AcceptPermissionsFunc func(PluginPrivileges) (bool, error)
 	Args                  []string
