@@ -13,7 +13,7 @@ URL: https://dockerproject.org
 Vendor: Docker
 Packager: Docker <support@docker.com>
 
-%global selinux_policyver 3.13.1-102
+%global selinux_policyver 3.13.1-23
 %global selinuxtype targeted
 %global moduletype  services
 %global modulenames docker
