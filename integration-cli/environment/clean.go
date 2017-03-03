@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	volumetypes "github.com/docker/docker/api/types/volume"
@@ -53,7 +54,21 @@ func getPausedContainers(t testingT, dockerBinary string) []string {
 func deleteAllContainers(t testingT, dockerBinary string) {
 	containers := getAllContainers(t, dockerBinary)
 	if len(containers) > 0 {
-		icmd.RunCommand(dockerBinary, append([]string{"rm", "-fv"}, containers...)...).Assert(t, icmd.Success)
+		for _, container := range containers {
+			result := icmd.RunCommand(dockerBinary, "rm", "-fv", container)
+			// we want to ignore two errors caused by race conditions, 1) if the container doesn't exist, and 2) if the container is already being removed
+			if result.Error != nil {
+				// if container removal is already in progress, add it to the back of the list, wait a few seconds, then continue normally
+				if strings.Contains(result.Stderr(), "is already in progress") {
+					containers = append(containers, container)
+					time.Sleep(1 * time.Second)
+					continue
+				}
+				if !strings.Contains(result.Stderr(), "No such container") {
+					result.Assert(t, icmd.Success)
+				}
+			}
+		}
 	}
 }
 
