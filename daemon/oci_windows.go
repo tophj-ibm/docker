@@ -18,9 +18,9 @@ func (daemon *Daemon) createSpec(c *container.Container) (*specs.Spec, error) {
 		return nil, err
 	}
 
-	if err := c.SetupWorkingDirectory(0, 0); err != nil {
-		return nil, err
-	}
+	// Note, unlike Unix, we do NOT call into SetupWorkingDirectory as
+	// this is done in VMCompute. Further, we couldn't do it for Hyper-V
+	// containers anyway.
 
 	// In base spec
 	s.Hostname = c.FullHostname()
@@ -81,10 +81,19 @@ func (daemon *Daemon) createSpec(c *container.Container) (*specs.Spec, error) {
 	// @darrenstahlmsft implement these resources
 	cpuShares := uint16(c.HostConfig.CPUShares)
 	cpuPercent := uint8(c.HostConfig.CPUPercent)
-	if c.HostConfig.NanoCPUs > 0 {
-		cpuPercent = uint8(c.HostConfig.NanoCPUs * 100 / int64(sysinfo.NumCPU()) / 1e9)
-	}
 	cpuCount := uint64(c.HostConfig.CPUCount)
+	if c.HostConfig.NanoCPUs > 0 {
+		if isHyperV {
+			cpuCount = uint64(c.HostConfig.NanoCPUs / 1e9)
+			leftoverNanoCPUs := c.HostConfig.NanoCPUs % 1e9
+			if leftoverNanoCPUs != 0 {
+				cpuCount++
+				cpuPercent = uint8(c.HostConfig.NanoCPUs * 100 / int64(cpuCount) / 1e9)
+			}
+		} else {
+			cpuPercent = uint8(c.HostConfig.NanoCPUs * 100 / int64(sysinfo.NumCPU()) / 1e9)
+		}
+	}
 	memoryLimit := uint64(c.HostConfig.Memory)
 	s.Windows.Resources = &specs.WindowsResources{
 		CPU: &specs.WindowsCPUResources{

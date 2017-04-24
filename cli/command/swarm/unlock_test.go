@@ -2,15 +2,17 @@ package swarm
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
 	"strings"
 	"testing"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/swarm"
+	"github.com/docker/docker/cli/command"
 	"github.com/docker/docker/cli/internal/test"
-	"github.com/docker/docker/pkg/testutil/assert"
+	"github.com/docker/docker/pkg/testutil"
+	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSwarmUnlockErrors(t *testing.T) {
@@ -59,7 +61,7 @@ func TestSwarmUnlockErrors(t *testing.T) {
 				}, nil
 			},
 			swarmUnlockFunc: func(req swarm.UnlockRequest) error {
-				return fmt.Errorf("error unlocking the swarm")
+				return errors.Errorf("error unlocking the swarm")
 			},
 			expectedError: "error unlocking the swarm",
 		},
@@ -73,7 +75,7 @@ func TestSwarmUnlockErrors(t *testing.T) {
 			}, buf))
 		cmd.SetArgs(tc.args)
 		cmd.SetOutput(ioutil.Discard)
-		assert.Error(t, cmd.Execute(), tc.expectedError)
+		testutil.ErrorContains(t, cmd.Execute(), tc.expectedError)
 	}
 }
 
@@ -90,12 +92,12 @@ func TestSwarmUnlock(t *testing.T) {
 		},
 		swarmUnlockFunc: func(req swarm.UnlockRequest) error {
 			if req.UnlockKey != input {
-				return fmt.Errorf("Invalid unlock key")
+				return errors.Errorf("Invalid unlock key")
 			}
 			return nil
 		},
 	}, buf)
-	dockerCli.SetIn(ioutil.NopCloser(strings.NewReader(input)))
+	dockerCli.SetIn(command.NewInStream(ioutil.NopCloser(strings.NewReader(input))))
 	cmd := newUnlockCommand(dockerCli)
-	assert.NilError(t, cmd.Execute())
+	assert.NoError(t, cmd.Execute())
 }

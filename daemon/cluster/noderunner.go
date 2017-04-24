@@ -109,6 +109,7 @@ func (n *nodeRunner) start(conf nodeStartConfig) error {
 		ElectionTick:       3,
 		UnlockKey:          conf.lockKey,
 		AutoLockManagers:   conf.autolock,
+		PluginGetter:       n.cluster.config.Backend.PluginGetter(),
 	}
 	if conf.availability != "" {
 		avail, ok := swarmapi.NodeSpec_Availability_value[strings.ToUpper(string(conf.availability))]
@@ -209,11 +210,10 @@ func (n *nodeRunner) Stop() error {
 	n.stopping = true
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	n.mu.Unlock()
 	if err := n.swarmNode.Stop(ctx); err != nil && !strings.Contains(err.Error(), "context canceled") {
-		n.mu.Unlock()
 		return err
 	}
-	n.mu.Unlock()
 	<-n.done
 	return nil
 }
