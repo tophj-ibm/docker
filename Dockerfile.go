@@ -3,7 +3,7 @@
 # Usage:
 #
 # # Assemble the full dev environment. This is slow the first time.
-# docker build -t docker-upstream-go .
+# docker build -t docker .
 #
 # # Mount your source in an interactive container for quick testing:
 # docker run -v `pwd`:/go/src/github.com/docker/docker --privileged -i -t docker bash
@@ -25,15 +25,14 @@
 
 FROM debian:jessie
 
+# allow replacing httpredir or deb mirror
+ARG APT_MIRROR=deb.debian.org
+RUN sed -ri "s/(httpredir|deb).debian.org/$APT_MIRROR/g" /etc/apt/sources.list
+
 # Add zfs ppa
-RUN apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys E871F18B51E0147C77796AC81196BA81F6B0FC61 \
-	|| apt-key adv --keyserver hkp://pgp.mit.edu:80 --recv-keys E871F18B51E0147C77796AC81196BA81F6B0FC61
+COPY keys/launchpad-ppa-zfs.asc /go/src/github.com/docker/docker/keys/
+RUN apt-key add /go/src/github.com/docker/docker/keys/launchpad-ppa-zfs.asc
 RUN echo deb http://ppa.launchpad.net/zfs-native/stable/ubuntu trusty main > /etc/apt/sources.list.d/zfs.list
-
-
-# Allow replacing httpredir mirror
-ARG APT_MIRROR=httpredir.debian.org
-RUN sed -i s/httpredir.debian.org/$APT_MIRROR/g /etc/apt/sources.list
 
 # Packaged dependencies
 RUN apt-get update && apt-get install -y \
@@ -47,6 +46,7 @@ RUN apt-get update && apt-get install -y \
 	btrfs-tools \
 	build-essential \
 	clang \
+	cmake \
 	createrepo \
 	curl \
 	dpkg-sig \
@@ -54,15 +54,16 @@ RUN apt-get update && apt-get install -y \
 	git \
 	iptables \
 	jq \
+	less \
 	libapparmor-dev \
 	libcap-dev \
 	libltdl-dev \
 	libnl-3-dev \
 	libprotobuf-c0-dev \
 	libprotobuf-dev \
-	libsqlite3-dev \
 	libsystemd-journal-dev \
 	libtool \
+	libzfs-dev \
 	mercurial \
 	net-tools \
 	pkg-config \
@@ -72,10 +73,11 @@ RUN apt-get update && apt-get install -y \
 	python-mock \
 	python-pip \
 	python-websocket \
-	ubuntu-zfs \
-	xfsprogs \
-	libzfs-dev \
 	tar \
+	ubuntu-zfs \
+	vim \
+	vim-common \
+	xfsprogs \
 	zip \
 	--no-install-recommends \
 	&& pip install awscli==1.10.15
@@ -106,8 +108,8 @@ RUN set -x \
 	&& UNATTENDED=yes OSX_VERSION_MIN=10.6 ${OSXCROSS_PATH}/build.sh
 ENV PATH /osxcross/target/bin:$PATH
 
-# Install seccomp: the version shipped in trusty is too old
-ENV SECCOMP_VERSION 2.3.1
+# Install seccomp: the version shipped upstream is too old
+ENV SECCOMP_VERSION 2.3.2
 RUN set -x \
 	&& export SECCOMP_PATH="$(mktemp -d)" \
 	&& curl -fsSL "https://github.com/seccomp/libseccomp/releases/download/v${SECCOMP_VERSION}/libseccomp-${SECCOMP_VERSION}.tar.gz" \
@@ -125,25 +127,32 @@ RUN set -x \
 # IMPORTANT: If the version of Go is updated, the Windows to Linux CI machines
 #            will need updating, to avoid errors. Ping #docker-maintainers on IRC
 #            with a heads-up.
-ENV GO_VERSION 1.7.3
-RUN curl -fSL "https://storage.googleapis.com/golang/go${GO_VERSION}.linux-amd64.tar.gz" | tar xzC /tmp/
-ENV GOROOT_BOOTSTRAP /tmp/go
-
-RUN cd /usr/local \
-	&& git clone --no-checkout https://go.googlesource.com/go \
-	&& cd go && git checkout master && cd src \
-	&& ./make.bash 2>&1
-
+ENV GO_VERSION 1.7.5
+RUN curl -fsSL "https://golang.org/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
+	| tar -xzC /usr/local
 
 ENV PATH /go/bin:/usr/local/go/bin:$PATH
 ENV GOPATH /go
+
+# Install upstream go
+
+RUN set -x \
+        && cd /usr/local \
+        && TEMPDIR="$(mktemp -d)" \
+        && mv /usr/local/go $TEMPDIR \
+        && export GOROOT_BOOTSTRAP=$TEMPDIR/go \
+        && cd /usr/local \
+        && git clone --no-checkout https://go.googlesource.com/go \
+        && cd go && git checkout master && cd src \
+        && ./make.bash 2>&1
 
 # Compile Go for cross compilation
 ENV DOCKER_CROSSPLATFORMS \
 	linux/386 linux/arm \
 	darwin/amd64 \
 	freebsd/amd64 freebsd/386 freebsd/arm \
-	windows/amd64 windows/386
+	windows/amd64 windows/386 \
+	solaris/amd64
 
 # Dependency for golint
 ENV GO_TOOLS_COMMIT 823804e1ae08dbb14eb807afc7db9993bc9e3cc3
@@ -157,8 +166,10 @@ RUN git clone https://github.com/golang/lint.git /go/src/github.com/golang/lint 
 	&& go install -v github.com/golang/lint/golint
 
 # Install CRIU for checkpoint/restore support
-ENV CRIU_VERSION 2.2
-RUN mkdir -p /usr/src/criu \
+ENV CRIU_VERSION 2.12.1
+# Install dependancy packages specific to criu
+RUN apt-get install libnet-dev -y && \
+	mkdir -p /usr/src/criu \
 	&& curl -sSL https://github.com/xemul/criu/archive/v${CRIU_VERSION}.tar.gz | tar -v -C /usr/src/criu/ -xz --strip-components=1 \
 	&& cd /usr/src/criu \
 	&& make \
@@ -182,7 +193,7 @@ RUN set -x \
 	&& rm -rf "$GOPATH"
 
 # Install notary and notary-server
-ENV NOTARY_VERSION v0.4.2
+ENV NOTARY_VERSION v0.5.0
 RUN set -x \
 	&& export GOPATH="$(mktemp -d)" \
 	&& git clone https://github.com/docker/notary.git "$GOPATH/src/github.com/docker/notary" \
@@ -194,11 +205,25 @@ RUN set -x \
 	&& rm -rf "$GOPATH"
 
 # Get the "docker-py" source so we can run their integration tests
-ENV DOCKER_PY_COMMIT e2655f658408f9ad1f62abdef3eb6ed43c0cf324
+ENV DOCKER_PY_COMMIT 4a08d04aef0595322e1b5ac7c52f28a931da85a5
+# To run integration tests docker-pycreds is required.
+# Before running the integration tests conftest.py is
+# loaded which results in loads auth.py that
+# imports the docker-pycreds module.
 RUN git clone https://github.com/docker/docker-py.git /docker-py \
 	&& cd /docker-py \
 	&& git checkout -q $DOCKER_PY_COMMIT \
+	&& pip install docker-pycreds==0.2.1 \
 	&& pip install -r test-requirements.txt
+
+# Install yamllint for validating swagger.yaml
+RUN pip install yamllint==1.5.0
+
+# Install go-swagger for validating swagger.yaml
+ENV GO_SWAGGER_COMMIT c28258affb0b6251755d92489ef685af8d4ff3eb
+RUN git clone https://github.com/go-swagger/go-swagger.git /go/src/github.com/go-swagger/go-swagger \
+	&& (cd /go/src/github.com/go-swagger/go-swagger && git checkout -q $GO_SWAGGER_COMMIT) \
+	&& go install -v github.com/go-swagger/go-swagger/cmd/swagger
 
 # Set user.email so crosbymichael's in-container merge commits go smoothly
 RUN git config --global user.email 'docker-dummy@example.com'
@@ -222,16 +247,17 @@ RUN ln -sv $PWD/contrib/completion/bash/docker /etc/bash_completion.d/docker
 # Get useful and necessary Hub images so we can "docker load" locally instead of pulling
 COPY contrib/download-frozen-image-v2.sh /go/src/github.com/docker/docker/contrib/
 RUN ./contrib/download-frozen-image-v2.sh /docker-frozen-images \
-	buildpack-deps:jessie@sha256:25785f89240fbcdd8a74bdaf30dd5599a9523882c6dfc567f2e9ef7cf6f79db6 \
-	busybox:latest@sha256:e4f93f6ed15a0cdd342f5aae387886fba0ab98af0a102da6276eaf24d6e6ade0 \
-	debian:jessie@sha256:f968f10b4b523737e253a97eac59b0d1420b5c19b69928d35801a6373ffe330e \
-	hello-world:latest@sha256:8be990ef2aeb16dbcb9271ddfe2610fa6658d13f6dfb8bc72074cc1ca36966a7
-# See also "hack/make/.ensure-frozen-images" (which needs to be updated any time this list is)
+	buildpack-deps:jessie@sha256:85b379ec16065e4fe4127eb1c5fb1bcc03c559bd36dbb2e22ff496de55925fa6 \
+	busybox:latest@sha256:32f093055929dbc23dec4d03e09dfe971f5973a9ca5cf059cbfb644c206aa83f \
+	debian:jessie@sha256:72f784399fd2719b4cb4e16ef8e369a39dc67f53d978cd3e2e7bf4e502c7b793 \
+	hello-world:latest@sha256:c5515758d4c5e1e838e9cd307f6c6a0d620b5e07e6f927b07d05f6d12a1ac8d7
+# See also ensureFrozenImagesLinux() in "integration-cli/fixtures_linux_daemon_test.go" (which needs to be updated when adding images to this list)
 
-# Install tomlv, vndr, runc, containerd, grimes, docker-proxy
+# Install tomlv, vndr, runc, containerd, tini, docker-proxy
 # Please edit hack/dockerfile/install-binaries.sh to update them.
+COPY hack/dockerfile/binaries-commits /tmp/binaries-commits
 COPY hack/dockerfile/install-binaries.sh /tmp/install-binaries.sh
-RUN /tmp/install-binaries.sh tomlv vndr runc containerd grimes proxy
+RUN /tmp/install-binaries.sh tomlv vndr runc containerd tini proxy bindata
 
 # Wrap all commands in the "docker-in-docker" script to allow nested containers
 ENTRYPOINT ["hack/dind"]
