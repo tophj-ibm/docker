@@ -145,8 +145,8 @@ func (s *DockerManifestSuite) TestManifestAnnotate(c *check.C) {
 	out, _, _ = dockerCmdWithError("manifest", "annotate", testRepoRegistry, image2, "--os", "linux", "--arch", "badarch")
 	c.Assert(out, checker.Contains, "Manifest entry for image has unsupported os/arch combination")
 
-	// now annotate correctly
-	_, _, err := dockerCmdWithError("manifest", "annotate", testRepoRegistry, image1, "--os", "linux", "--arch", "amd64", "--cpuFeatures", "sse1", "--osFeatures", "osf1")
+	// now annotate correctly with duplicate cpu and os features
+	_, _, err := dockerCmdWithError("manifest", "annotate", testRepoRegistry, image1, "--os", "linux", "--arch", "amd64", "--cpuFeatures", "sse1, sse1", "--osFeatures", "osf1, osf1")
 	c.Assert(err, checker.IsNil)
 	_, _, err = dockerCmdWithError("manifest", "annotate", testRepoRegistry, image2, "--os", "freebsd", "--arch", "arm", "--cpuFeatures", "sse2", "--osFeatures", "osf2")
 	c.Assert(err, checker.IsNil)
@@ -158,9 +158,10 @@ func (s *DockerManifestSuite) TestManifestAnnotate(c *check.C) {
 	c.Assert(out, checker.Contains, "OS: freebsd")
 	c.Assert(out, checker.Contains, "Arch: amd64")
 	c.Assert(out, checker.Contains, "Arch: arm")
-	c.Assert(out, checker.Contains, "CPU Features: sse")
+	c.Assert(out, checker.Contains, "CPU Features: sse1")
 	c.Assert(out, checker.Contains, "CPU Features: sse2")
 	c.Assert(out, checker.Contains, "OS Features: osf1")
 	c.Assert(out, checker.Contains, "OS Features: osf2")
-
+	c.Assert(strings.Count(out, "sse1"), checker.Equals, 1)
+	c.Assert(strings.Count(out, "osf1"), checker.Equals, 1)
 }
