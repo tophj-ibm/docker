@@ -113,7 +113,7 @@ func NewBuildCommand(dockerCli *command.DockerCli) *cobra.Command {
 	flags.StringVar(&options.networkMode, "network", "default", "Set the networking mode for the RUN instructions during build")
 	flags.SetAnnotation("network", "version", []string{"1.25"})
 	flags.Var(&options.extraHosts, "add-host", "Add a custom host-to-IP mapping (host:ip)")
-	flags.Var(&options.mounts, "mount", "Attach a filesystem mount to the service")
+	flags.VarP(&options.mounts, "volume", "v", "Attach a filesystem mount to the service")
 
 	command.AddTrustVerificationFlags(flags)
 
