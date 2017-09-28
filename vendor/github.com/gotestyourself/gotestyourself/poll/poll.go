@@ -29,7 +29,7 @@ type Settings struct {
 }
 
 func defaultConfig() *Settings {
-	return &Settings{Timeout: 10 * time.Second, Delay: time.Millisecond}
+	return &Settings{Timeout: 30 * time.Second, Delay: time.Millisecond}
 }
 
 // SettingOp is a function which accepts and modifies Settings

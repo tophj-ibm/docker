@@ -1,6 +1,7 @@
 package service
 
 import (
+//	"bytes"
 	"fmt"
 	"testing"
 	"time"
@@ -139,10 +140,30 @@ func serviceContainerCount(client client.ServiceAPIClient, id string, count uint
 		switch {
 		case err != nil:
 			return poll.Error(err)
-		case len(tasks) == int(count):
+		case len(tasks) >= int(count):
+			fmt.Println("tasks are : ", len(tasks), " count is ", count)
+			for i, _ := range tasks {
+				fmt.Println(i, " node state is : ", tasks[i].Status.State)
+
+			}
+			return poll.Continue("testing and waiting for %v", swarm.TaskStateRunning)
+
 			for _, task := range tasks {
+// To monitor service logs, uncomment this, bytes at the top, and comment the above return"
+//				logs, _ := client.ServiceLogs(context.Background(), id, types.ContainerLogsOptions{
+//					ShowStderr:true,
+//				})
+//				buf := new(bytes.Buffer)
+//				buf.ReadFrom(logs)
+//				fmt.Println("logs are : ", buf.String())
 				if task.Status.State != swarm.TaskStateRunning {
+					fmt.Println("it's not running, it's : ", task.Status.State)
 					return poll.Continue("waiting for tasks to enter %v", swarm.TaskStateRunning)
+				}
+				fmt.Println("now running, so sleeping : ", task.Status.State)
+				for i:=0 ; i < 100; i++{
+					fmt.Println("current status :", task.Status.State)
+					time.Sleep(100 * time.Millisecond)
 				}
 			}
 			return poll.Success()
